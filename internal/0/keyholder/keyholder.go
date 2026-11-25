@@ -288,12 +288,16 @@ func (l *Launcher) launch(ctx context.Context, sessionKey string, ly layout) (Pa
 // any directory is removed. A unit that will not stop leaves the directories in
 // place and is an error. A session with no pair is not an error.
 func (l *Launcher) Stop(ctx context.Context, sessionKey string) error {
-	unlock, err := l.lockSession(ctx, sessionKey)
+	h, err := l.acquire(ctx, Hash(sessionKey), sessionKey, lockWait)
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	return l.stop(ctx, sessionKey)
+	if err := l.stop(ctx, sessionKey); err != nil {
+		h.Unlock() // the pair is still there: keep the lock file with it
+		return err
+	}
+	h.Remove() // the pair is gone: so is its lock file, the very last thing removed
+	return nil
 }
 
 func (l *Launcher) stop(ctx context.Context, sessionKey string) error {

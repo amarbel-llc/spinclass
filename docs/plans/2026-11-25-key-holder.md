@@ -233,11 +233,17 @@ cannot write.
 - **Lock.** Start and Stop of one session take an exclusive flock on
   `<state>/spinclass/keyholder/<hash>.lock`, in the keyholder root beside the
   session directory (Stop removes the directory, so a lock inside it would vanish
-  under its holder). 0600, opened with O_NOFOLLOW, never removed. A second start
+  under its holder). 0600, opened with O_NOFOLLOW. A second start
   of the same session waits, then finds the live pair and returns it: one pair,
   one mint, whatever races. A lock held for more than a minute fails the second
-  caller with a message naming the file. The file survives Stop on purpose: two
-  files for one pair would be two locks.
+  caller with a message naming the file. Stop removes the file as its very last
+  step, under the lock: it unlinks only if the path still names the inode it
+  locked, and every acquire checks the same after the flock (a waiter that held
+  the removed inode closes it and locks the new file), so two holders are never
+  inside across the unlink. A stop that fails keeps the pair and its lock. A lock
+  file with no pair and no directory is found by `sc keyholder-stop --all` and
+  removed by it and by `sc clean` unless a process holds the lock (a try-lock:
+  the sweep never waits). Stopping a pair, and switching off, leave no file.
 - **Switching `mode` off** starts nothing and leaves nothing for NEW sessions.
   The pairs of existing sessions run until their session closes; `sc close`
   stops a pair whatever the switch says. A confined session spawned with a holder

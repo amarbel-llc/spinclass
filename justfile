@@ -2130,7 +2130,7 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     procs="$(pgrep -f "$base" || true)"
     dirs="$(find "$XDG_STATE_HOME" -mindepth 3 -maxdepth 3 -path '*keyholder/*' 2>/dev/null | wc -l)"
     say "after stop: units=$units processes='${procs}' directories=$dirs"
-    if [ "$units" = 0 ] && [ -z "$procs" ] && [ "$dirs" = 0 ]; then say "LIVE-OK one pair started, listed one key, stopped, nothing left"; else say "FAIL: leftovers"; exit 1; fi
+    if [ "$units" = 0 ] && [ -z "$procs" ] && [ "$dirs" = 0 ]; then say "LIVE-OK one pair started, listed one key, stopped, nothing left"; else say "FAIL: leftovers"; find "$XDG_STATE_HOME" -mindepth 3 -maxdepth 3 -path '*keyholder/*' -printf 'live:   left: %P (%y %m)\n' 2>/dev/null; exit 1; fi
 
 # Regenerate the `sc session-key` golden fixtures from the REAL binary and a REAL pair: a throwaway repo and session
 # in an isolated HOME and state dir, one fibby + holder pair (virtual card, no real card, no PIN, a throwaway minted

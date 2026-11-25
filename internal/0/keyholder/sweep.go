@@ -38,6 +38,10 @@ type Found struct {
 	// Age is how long ago the pair was minted (its record's time, else the
 	// directory's); zero when there is neither.
 	Age time.Duration
+	// LockOnly is true when all that is left of the pair is its `<hash>.lock`
+	// file: no directory, no loaded unit. StopFound removes such a file only if
+	// no process holds the lock, and never waits for one.
+	LockOnly bool
 }
 
 // Find lists every pair under the root and every key holder unit systemd has
@@ -87,6 +91,23 @@ func (l *Launcher) Find(ctx context.Context) ([]Found, error) {
 			}
 		}
 	}
+	// A `<hash>.lock` with no directory and no unit is all that is left of a pair
+	// whose stop was cut short (or of a build that left it behind).
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".lock") || !hashRE.MatchString(strings.TrimSuffix(name, ".lock")) {
+			continue
+		}
+		h := strings.TrimSuffix(name, ".lock")
+		if _, known := byHash[h]; known {
+			continue
+		}
+		f := get(h)
+		f.LockOnly = true
+		if fi, err := e.Info(); err == nil {
+			f.Age = now.Sub(fi.ModTime())
+		}
+	}
 	out := make([]Found, 0, len(byHash))
 	for h, f := range byHash {
 		sort.Strings(f.Units)
@@ -114,18 +135,27 @@ func (l *Launcher) StopFound(ctx context.Context, f Found) error {
 	if name == "" {
 		name = "pair " + f.Hash
 	}
-	unlock, err := l.lockHash(ctx, f.Hash, name)
+	wait := lockWait
+	if f.LockOnly {
+		wait = 0 // a lock file with no pair: if anyone holds it, it is not ours to remove
+	}
+	h, err := l.acquire(ctx, f.Hash, name, wait)
+	if errors.Is(err, errLockHeld) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	defer unlock()
 	if err := l.teardown(ctx, l.layoutForHash(f.Hash)); err != nil {
+		h.Unlock()
 		return err
 	}
 	hist := filepath.Join(l.Base, f.Hash+".last.json")
 	if err := os.Remove(hist); err != nil && !errors.Is(err, os.ErrNotExist) {
+		h.Unlock()
 		return fmt.Errorf("removing the key history %s: %w", hist, err)
 	}
+	h.Remove() // the lock file goes last, under the lock
 	l.logf("keyholder: stopped the pair %s (%s)", f.Hash, strings.TrimSpace(f.Session))
 	return nil
 }

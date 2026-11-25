@@ -97,28 +97,6 @@ func TestAStopRacingAStartLeavesAWholePairOrNone(t *testing.T) {
 	}
 }
 
-// The lock lives beside the session's directory, so Stop removing the directory
-// does not remove the file someone else may hold.
-func TestTheSessionLockSurvivesAStopAndIsOwnerOnly(t *testing.T) {
-	l, _, _ := launcher(t)
-	if _, err := l.Start(context.Background(), "s/a"); err != nil {
-		t.Fatal(err)
-	}
-	if err := l.Stop(context.Background(), "s/a"); err != nil {
-		t.Fatal(err)
-	}
-	fi, err := os.Stat(LockPath(l.Base, "s/a"))
-	if err != nil {
-		t.Fatalf("the lock file is gone after Stop: %v", err)
-	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Errorf("lock mode = %o, want 600", fi.Mode().Perm())
-	}
-	if filepath.Dir(LockPath(l.Base, "s/a")) != l.Base || strings.HasPrefix(LockPath(l.Base, "s/a"), filepath.Join(l.Base, Hash("s/a"))+string(filepath.Separator)) {
-		t.Errorf("the lock %s is inside the session directory", LockPath(l.Base, "s/a"))
-	}
-}
-
 // A lock that is held and never released fails the second launch with a message
 // naming the lock, after lockWait, instead of waiting for ever.
 func TestAHeldLockFailsTheNextStartWithANamedReason(t *testing.T) {

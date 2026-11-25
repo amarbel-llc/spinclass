@@ -1541,9 +1541,14 @@ values differ, the launch is refused.
 	launch in flight and is left alone). A stopped pair's session keeps running
 	without a holder; its next resume or restart starts a new pair and mints a new
 	key if the switch is on. Two starts or stops of one session are serialised
-	by a lock file, *$XDG_STATE_HOME/spinclass/keyholder/<hash>.lock*, which stays
-	after the pair is gone; the second waits up to a minute and then fails naming
-	the lock.
+	by a lock file, *$XDG_STATE_HOME/spinclass/keyholder/<hash>.lock*; the second
+	waits up to a minute and then fails naming the lock. Stopping a pair removes
+	its lock file too, as the very last step and under the lock itself (a waiter
+	that held the removed file notices and locks the new one); a stop that fails
+	keeps the pair and so its lock. A lock file left with no pair (a stop that was
+	cut short, a build that kept it) is listed by the dry run of
+	*sc keyholder-stop --all* and removed by that command and by *sc clean*,
+	unless a process holds the lock: the sweep never waits for a held lock.
 
 	*Units.* A session's pair is two transient user units,
 	*spinclass-keyholder-fibby-<hash>.service* (fibby, the virtual card) and

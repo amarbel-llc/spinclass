@@ -38,6 +38,8 @@ func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duratio
 		switch {
 		case f.Session != "" && live[f.Session]:
 			p.Why = "session " + f.Session + " is live"
+		case f.LockOnly:
+			p.Orphan, p.Why = true, "a leftover lock file with no pair (removed unless a process holds it)"
 		case f.Dir == "":
 			p.Orphan, p.Why = true, "units with no directory and no session"
 		case f.Age < minAge:

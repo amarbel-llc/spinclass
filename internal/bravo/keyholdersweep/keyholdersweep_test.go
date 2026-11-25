@@ -36,6 +36,15 @@ func TestClassifySeparatesLiveSessionsFromOrphans(t *testing.T) {
 	}
 }
 
+// A lock file with no pair is an orphan at any age: a launch in flight holds its
+// lock, and the sweep never waits for or removes a held one.
+func TestClassifyCallsALeftoverLockFileAnOrphanAtAnyAge(t *testing.T) {
+	got := Classify([]keyholder.Found{{Hash: "0123456789abcdef", LockOnly: true, Age: time.Second}}, map[string]bool{}, time.Hour)
+	if len(got) != 1 || !got[0].Orphan || !strings.Contains(got[0].Why, "lock file") {
+		t.Fatalf("Classify = %+v, want an orphan lock file", got)
+	}
+}
+
 func TestDescribeNamesTheHashTheSessionAndTheState(t *testing.T) {
 	line := Describe(Pair{Found: keyholder.Found{Hash: "0123456789abcdef", Running: true}, Why: "x"})
 	for _, want := range []string{"0123456789abcdef", "session=unknown", "running"} {
