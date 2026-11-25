@@ -24,6 +24,7 @@ type khFakeRunner struct {
 	active    map[string]bool
 	listeners []net.Listener
 	mintErr   error
+	stuck     map[string]bool // units that stay active after Stop
 }
 
 func newKhFake(t *testing.T) *khFakeRunner {
@@ -76,7 +77,9 @@ func (f *khFakeRunner) Active(_ context.Context, unit string) (bool, error) {
 func (f *khFakeRunner) Stop(_ context.Context, unit string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.active[unit] = false
+	if !f.stuck[unit] {
+		f.active[unit] = false
+	}
 	return nil
 }
 

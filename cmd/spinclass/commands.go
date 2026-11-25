@@ -79,6 +79,7 @@ func buildApp() *command.App {
 	registerConfinementBindCommand(app)
 	registerSessionKeyCommand(app)
 	registerKeyholderPairCommand(app)
+	registerKeyholderStopCommand(app)
 	registerVersionCommand(app)
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)
