@@ -137,9 +137,14 @@ func launcher(t *testing.T) (*Launcher, *fakeRunner, *[]string) {
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
 	f := newFake(t)
 	var logs []string
+	var logMu sync.Mutex // Stop and Start may log from two goroutines in the race tests
 	return &Launcher{
 		Base: filepath.Join(base, "kh"), Tools: Tools{Fibby: "/pin/fibby", Piggy: "/pin/piggy"}, Run: f,
-		Log: func(format string, a ...any) { logs = append(logs, fmt.Sprintf(format, a...)) }, Wait: time.Second,
+		Log: func(format string, a ...any) {
+			logMu.Lock()
+			defer logMu.Unlock()
+			logs = append(logs, fmt.Sprintf(format, a...))
+		}, Wait: time.Second,
 	}, f, &logs
 }
 
