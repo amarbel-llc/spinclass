@@ -156,7 +156,7 @@ func registerServeCommand(app *command.App) {
 
 			// Bridge listener (bridge contract v1): off unless clown exported
 			// the directory and unit and a trusted [bridge] enable is set.
-			if stopBridge := startBridge(sigCtx); stopBridge != nil {
+			if stopBridge := startBridge(sigCtx, newBridgeSessionHandler(registry, app.Name, app.Version)); stopBridge != nil {
 				defer stopBridge()
 			}
 

@@ -63,8 +63,8 @@ var bridgeResolve = func() bridgePlan {
 
 // startBridge starts the bridge listener when the plan allows it and returns
 // what stops it; nil when serve runs without it, with the reason in the serve
-// log. It never fails serve.
-func startBridge(ctx context.Context) (stop func()) {
+// log. sessionHandler serves the session service. It never fails serve.
+func startBridge(ctx context.Context, sessionHandler bridgeserver.SessionHandler) (stop func()) {
 	plan := bridgeResolve()
 	if plan.Dir == "" {
 		servelog.Infof("serve.bridge off: %s", plan.Reason)
@@ -75,7 +75,7 @@ func startBridge(ctx context.Context) (stop func()) {
 		servelog.Errorf("serve.bridge off: session key unresolved: %v", err)
 		return nil
 	}
-	return startBridgeFrom(ctx, plan, bridgeserver.Options{SessionKey: key, Logf: servelog.Errorf})
+	return startBridgeFrom(ctx, plan, bridgeserver.Options{SessionKey: key, Handler: sessionHandler, Logf: servelog.Errorf})
 }
 
 // startBridgeFrom listens per the plan with opts and serves until the
