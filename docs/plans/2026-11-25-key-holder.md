@@ -173,7 +173,7 @@ remint.go`, `cmd/spinclass/keyholder_remint.go`):
 - `sc list` (text, and the `keyholder` field of `--format json`) and session-health
   show `keyholder: DEAD` for a recorded pair that is not running and `keyholder:
   RE-MINTED ...` while no certificate for the new key is installed
-  (`<state>/spinclass/keyholder/<hash>/cert.pub` exists).
+  (`<state>/spinclass/keyholder/<hash>/cert/cert.pub`, see "The certificate").
 - clown relaunches a restarted session without `sc resume`, so the restart
   preflight, and `restart-preflight --rearm`, start a lost pair BEFORE they approve
   the relaunch; if the pair cannot be started they refuse the restart naming the
@@ -185,6 +185,48 @@ remint.go`, `cmd/spinclass/keyholder_remint.go`):
 Not covered: a pair that dies while the session runs is noticed by `sc list` and
 session-health, and fixed by the next resume or restart; nothing restarts it in
 the background.
+
+## The certificate (B-F4)
+
+The key holder's key opens nothing until the operator's card signs a certificate
+for it. Spinclass never signs and never holds a CA; it hands out the public key
+and gives the certificate a place to live, a place the session can read and
+cannot write.
+
+- **One path, one place that computes it** (`keyholder.CertPathIn`):
+  `<state>/spinclass/keyholder/<session-hash>/cert/cert.pub`. The `cert/`
+  DIRECTORY is created by the pair launch (and by `Start` for a live pair that
+  predates it), exactly 0700 whatever the umask, owned by the user, never a link;
+  the state root and the session directory are exactly 0700 too. The signer
+  writes `cert.pub` (0600) by write-then-rename into that directory only.
+- **Why a directory:** a bind mount of one file keeps the old inode after a rename
+  over it, so a bound `cert.pub` would never show the new certificate (and cannot
+  be bound before one exists). A confined unit gets the DIRECTORY, read-only, as
+  the only bind the key holder adds (`binds_ro`; fibby's, the agent's and the work
+  directory stay out), and `SPINCLASS_KEYHOLDER_CERT=<cert dir>/cert.pub` in its
+  environment. An unconfined session gets the same variable pointing at the same
+  file in the state directory. `CheckAgentBoundary` treats a stored holder spec
+  without that bind or variable as a changed boundary (close the session and spawn
+  a new one): clown's boundary digest covers `binds_ro`.
+- **`sc session-key SESSION`** prints exactly two lines on stdout: the key line as
+  the holder lists it (type, key, the holder's own comment) and its SHA256
+  fingerprint. `--json`: `{session, public_key, fingerprint, cert_path,
+  cert_expires, cert_matches_key, cert_problem}`; `session` is the canonical
+  `<repo>/<branch>` key whatever form was passed. A real capture of both forms is
+  in `cmd/spinclass/testdata/session-key.{txt,json}.golden`
+  (`just debug-session-key-capture` regenerates them from a real pair); a test
+  pins the field set and that the command still writes them byte for byte.
+- **Reading the certificate** (`keyholder.InspectCert`): no link followed
+  (`O_NOFOLLOW`), regular file, at most 16 KiB, one line, an OpenSSH certificate
+  type, then `ssh-keygen -L` on the bytes just read (stdin, so a swapped file is
+  never what ssh-keygen sees). `cert_matches_key` is true when the certified key's
+  fingerprint is the holder's, `cert_expires` is the end of the validity in UTC;
+  both are null with no certificate, and `cert_problem` says why an installed file
+  is unusable. A certificate for another key, an expired one or an unusable one is
+  a warning on stderr; stdout stays the two lines. `sc list` and session-health
+  show `certificate valid until ...`, `certificate is for ANOTHER key`,
+  `certificate EXPIRED` or `certificate unusable`; session-health also says `no
+  certificate`.
 
 ## Later
 

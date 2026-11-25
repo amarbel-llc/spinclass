@@ -2056,6 +2056,25 @@ debug-keyholder-probe fibby="" piggy="" timeout="60":
     fi
     say "agent.log tail:"; tail -n 8 "$base/agent.log" | sed 's/^/probe:   /'
 
+# Print what ssh-keygen -L and -l say about a certificate and its plain key (throwaway CA under .tmp, no holder, no card):
+# the fixture shape `sc session-key` parses (K4). Read-only apart from its own scratch directory.
+#
+# print ssh-keygen -L / -l output for a throwaway certificate
+[group("explore")]
+explore-cert-format:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    d="$(mktemp -d "$PWD/.tmp/cert-format.XXXXXX")"; chmod 0700 "$d"; trap 'rm -rf "$d"' EXIT
+    cd "$d"
+    ssh-keygen -q -t ed25519 -N '' -f ca -C test-ca >/dev/null
+    ssh-keygen -q -t ed25519 -N '' -f key -C 'holder:test 1' >/dev/null
+    ssh-keygen -q -s ca -I id-1 -n flic:restic-snapshots -V +1h key.pub
+    echo "== TZ=$(date +%Z)"; echo "== ssh-keygen -L -f key-cert.pub"; ssh-keygen -L -f key-cert.pub
+    echo "== ssh-keygen -lf key-cert.pub"; ssh-keygen -lf key-cert.pub
+    echo "== ssh-keygen -lf key.pub"; ssh-keygen -lf key.pub
+    echo "== cert.pub first field and size"; cut -d' ' -f1 key-cert.pub; wc -c <key-cert.pub
+
 # Key holder live proof (item A): build this tree's spinclass, start ONE real session pair (fibby + holder as
 # transient `systemd-run --user` units) through the hidden `sc keyholder-pair`, check `ssh-add -L` against its
 # socket lists exactly one key and `sc session-key`-style facts hold, stop the pair, and assert zero leftover units,
@@ -2110,6 +2129,54 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     dirs="$(find "$XDG_STATE_HOME" -mindepth 3 -maxdepth 3 -path '*keyholder/*' 2>/dev/null | wc -l)"
     say "after stop: units=$units processes='${procs}' directories=$dirs"
     if [ "$units" = 0 ] && [ -z "$procs" ] && [ "$dirs" = 0 ]; then say "LIVE-OK one pair started, listed one key, stopped, nothing left"; else say "FAIL: leftovers"; exit 1; fi
+
+# Regenerate the `sc session-key` golden fixtures from the REAL binary and a REAL pair: a throwaway repo and session
+# in an isolated HOME and state dir, one fibby + holder pair (virtual card, no real card, no PIN, a throwaway minted
+# key: only its public key and fingerprint appear), then `sc session-key` in both forms. The state directory is
+# rewritten to /state in cert_path so the files carry no host path. Writes cmd/spinclass/testdata/session-key.json.golden
+# and session-key.txt.golden. Refuses while per-cpu 1-minute load is 1.0 or more; one real pair, torn down afterwards.
+#
+# capture the real `sc session-key` output into the golden fixtures krusty's installer cites
+[group("debug")]
+debug-session-key-capture fibby="" piggy="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    say() { printf 'capture: %s\n' "$*"; }
+    load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
+    if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
+    here="$PWD"
+    out="$(nix build .#spinclass-native --no-link --print-out-paths 2>/dev/null | tail -1)"
+    sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built at $out"; exit 1; }
+    piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(command -v piggy)" || { say "no piggy on PATH"; exit 1; }
+    fibby="{{ fibby }}"
+    if [ -z "$fibby" ]; then for c in /nix/store/*-fibby-holder-0.1.0/bin/fibby; do fibby="$c"; done; fi
+    [ -x "$fibby" ] || { say "no fibby holder build found"; exit 1; }
+    base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/skc.XXXXXX")"; chmod 0700 "$base"
+    mkdir -m 0700 "$base/state" "$base/home" "$base/config"
+    export HOME="$base/home" XDG_STATE_HOME="$base/state" XDG_CONFIG_HOME="$base/config" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+    unset SSH_AUTH_SOCK PIGGY_AUTH_SOCK SPINCLASS_SESSION_ID CLOWN_SESSION_ID
+    pair() { "$sc" keyholder-pair --fibby "$fibby" --piggy "$piggy" "$@"; }
+    key=""
+    cleanup() { [ -z "$key" ] || pair --action stop --session "$key" >/dev/null 2>&1 || true; rm -rf "$base"; }
+    trap cleanup EXIT
+    git init -q "$base/repo" && cd "$base/repo" \
+      && git -c user.name=capture -c user.email=capture@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init \
+      || { say "could not make the throwaway repo"; exit 1; }
+    "$sc" start --no-attach >"$base/start.out" 2>&1 || { say "sc start failed"; cat "$base/start.out"; exit 1; }
+    branch="$(ls "$base/repo/.worktrees" | head -1)"; [ -n "$branch" ] || { say "no worktree made"; cat "$base/start.out"; exit 1; }
+    key="repo/$branch"
+    say "session $key"
+    pair --action start --session "$key" >"$base/pair.out" 2>"$base/pair.err" || { say "pair start failed"; cat "$base/pair.err"; exit 1; }
+    "$sc" session-key "$key" >"$base/key.txt" 2>"$base/key.txt.err" || { say "session-key failed"; cat "$base/key.txt.err"; exit 1; }
+    "$sc" session-key "$branch" --json >"$base/key.json" 2>"$base/key.json.err" || { say "session-key --json failed"; cat "$base/key.json.err"; exit 1; }
+    td="$here/cmd/spinclass/testdata"; mkdir -p "$td"
+    sed "s#$base/state#/state#g" "$base/key.txt" >"$td/session-key.txt.golden"
+    sed "s#$base/state#/state#g" "$base/key.json" >"$td/session-key.json.golden"
+    say "wrote $td/session-key.txt.golden ($(wc -l <"$td/session-key.txt.golden") lines) and session-key.json.golden"
+    sed 's/^/capture:   txt: /' "$td/session-key.txt.golden"; sed 's/^/capture:   json: /' "$td/session-key.json.golden"
+    pair --action stop --session "$key" >/dev/null 2>&1; key=""; sleep 1
+    say "after stop: $(systemctl --user list-units --all --no-legend 'spinclass-keyholder-*' 2>&1 | grep -c spinclass-keyholder || true) key holder units left"
 
 # Key holder probe B: a holder key minted OUTSIDE a unit is usable from INSIDE a real full unit. Starts a
 # throwaway fibby + holder pair (virtual card, no real card, no PIN), mints one key, then runs clown's

@@ -23,7 +23,7 @@ import (
 // whether a recorded pair's units run and starts nothing, so it needs no tools.
 // Tests replace it.
 var keyholderStatusLauncherFn = func() *keyholder.Launcher {
-	return &keyholder.Launcher{Base: keyholderStateBaseFn(), Run: keyholder.SystemdRunner{}}
+	return &keyholder.Launcher{Base: keyholderStateBaseFn(), Run: keyholder.SystemdRunner{}, CertList: sessionKeyCertList}
 }
 
 // keyholderStateBaseFn is where the pairs' state lives (<state>/spinclass/
@@ -115,6 +115,9 @@ func keyholderNote(sessionKey string, includeOK bool) string {
 		return n
 	}
 	if includeOK && h.State == "ok" {
+		if h.Cert.State == keyholder.CertNone {
+			return "keyholder: ok (" + h.Fingerprint + "), no certificate"
+		}
 		return "keyholder: ok (" + h.Fingerprint + ")"
 	}
 	return ""

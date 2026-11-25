@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 )
 
 // ssh-keygen -L prints the validity in the host's local zone with no zone
@@ -14,7 +16,7 @@ func TestCertExpiryIsReadInTheLocalZoneAndReportedInUTC(t *testing.T) {
 	t.Cleanup(func() { time.Local = prev })
 	time.Local = time.FixedZone("UTC+2", 2*3600)
 
-	got, err := parseCertExpiry("        Valid: from 2026-11-25T20:00:00 to 2026-11-26T20:00:00\n")
+	got, err := keyholder.ParseCertExpiry("        Valid: from 2026-11-25T20:00:00 to 2026-11-26T20:00:00\n")
 	if err != nil {
 		t.Fatal(err)
 	}

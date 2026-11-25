@@ -1468,7 +1468,12 @@ because the switch changes what a session can sign with and is the operator's.
 	For a session that is not confined this is delegation hygiene, not a
 	boundary. Switching it *"off"* leaves no pair, unit or directory for new
 	sessions. *sc session-key SESSION* prints the session's public key and
-	fingerprint. Any other value is an error and leaves the key holder off.
+	fingerprint (with *--json*, also where its certificate is installed and what
+	that certificate says). The certificate is one file, *cert/cert.pub*, in a
+	directory of the session's pair under *$XDG_STATE_HOME/spinclass/keyholder*
+	that the signer writes by rename and a confined unit gets read-only; the
+	session finds it at *$SPINCLASS_KEYHOLDER_CERT*. Any other value is an error
+	and leaves the key holder off.
 
 *fibby*, *piggy*
 	The absolute store paths of the two programs the pair runs, for example
