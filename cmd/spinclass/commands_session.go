@@ -604,7 +604,7 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 
 	merged := hierarchy.Merged
 	entry := startEntry(resolvedPath, merged, os.Stderr)
-	kh, undoKeyholder, err := keyholderLaunchEnvUndo(os.Getenv("HOME"), repoPath, resolvedPath.SessionKey, false, os.Stderr)
+	kh, undoKeyholder, err := keyholderLaunchEnvFn(os.Getenv("HOME"), repoPath, resolvedPath.SessionKey, false, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -864,9 +864,20 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	}
 
 	env := withEnvPairs(withEnvPairs(entry.Env, dotenv), profileEnv)
-	kh, _, err := keyholderLaunchEnvUndo(os.Getenv("HOME"), state.RepoPath, state.SessionKey, resumeIsSpawned(state), os.Stderr)
+	kh, undoKeyholder, err := keyholderLaunchEnvFn(os.Getenv("HOME"), state.RepoPath, state.SessionKey, resumeIsSpawned(state), os.Stderr)
 	if err != nil {
 		return err
+	}
+	if scopeSpec != "" {
+		// The stored spec was written at spawn, under whatever the switch said
+		// then: bring its agent socket in line with the switch as it is now, in
+		// both directions, before clown reads it (B-F2 / A-H1).
+		if _, rerr := spawn.RetargetAgentSocket(stateDir, state.WorktreePath, kh, os.Getenv("SSH_AUTH_SOCK")); rerr != nil {
+			if undoKeyholder != nil {
+				undoKeyholder()
+			}
+			return fmt.Errorf("%s was launched confined and its stored unit spec cannot be brought in line with the key holder setting: %w; %s", state.SessionKey, rerr, closeCost(state))
+		}
 	}
 	env = withKeyholderEnv(env, kh)
 	if scopeSpec != "" {

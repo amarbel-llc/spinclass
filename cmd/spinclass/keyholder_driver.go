@@ -88,6 +88,11 @@ func resumeIsSpawned(st *session.State) bool {
 // `sc resume`: it classifies the launch, looks up the policy for its kind, and
 // applies it. The spawn path never comes through here: a spawned worker always
 // goes to keyholderSessionEnvUndo.
+// keyholderLaunchEnvFn is the seam `sc start` and `sc resume` call through, so a
+// test can see which launch kind each call site reports (start passes spawned
+// false; resume passes whether the record names a spawner).
+var keyholderLaunchEnvFn = keyholderLaunchEnvUndo
+
 func keyholderLaunchEnvUndo(home, repoPath, sessionKey string, spawned bool, stderr io.Writer) (map[string]string, func(), error) {
 	kind := classifyKeyholderLaunch(spawned)
 	if !keyholderPolicyFor(kind).StartsPair {
