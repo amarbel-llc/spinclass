@@ -156,8 +156,17 @@ func onlyKeyLine(listed []byte) (string, error) {
 
 // parseCertExpiry reads the end of the validity from `ssh-keygen -L` output
 // ("Valid: from 2026-11-25T20:00:00 to 2026-11-26T20:00:00"). ssh-keygen prints
-// local time without a zone, so the instant is read in the local zone.
+// local time without a zone, so the instant is read in the local zone and
+// returned in UTC: the value is then the same whatever zone the host is in.
 func parseCertExpiry(out string) (time.Time, error) {
+	t, err := parseCertExpiryLocal(out)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.UTC(), nil
+}
+
+func parseCertExpiryLocal(out string) (time.Time, error) {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "Valid:") {
