@@ -103,7 +103,14 @@ func startHandoffFor(child *session.State) ([]string, error) {
 func startStoppedSession(child *session.State, starter, childPrincipal string, argv []string, message string) (string, error) {
 	now := time.Now().UTC()
 	expanded := expandStartHandoff(argv, childPrincipal, child.Key(), startNotice(child, starter, now, message))
-	if out, herr := restartHandoffFn(child.WorktreePath, expanded); herr != nil {
+	env, undoKeyholder, err := startHandoffEnvFor(child, os.Environ(), os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("the start hand-off was not run, so %s is still stopped: %w", child.Key(), err)
+	}
+	if out, herr := startHandoffExecFn(child.WorktreePath, expanded, env); herr != nil {
+		if undoKeyholder != nil {
+			undoKeyholder()
+		}
 		return "", fmt.Errorf("the start hand-off %q failed (%v), so %s is still stopped: %s", expanded[0], herr, child.Key(), out)
 	}
 	stoppedAt := *child.StoppedAt

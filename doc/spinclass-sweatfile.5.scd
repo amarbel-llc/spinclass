@@ -1452,8 +1452,13 @@ because the switch changes what a session can sign with and is the operator's.
 	*SPINCLASS_SESSION_ID* in the environment, and the session's record names no
 	spawner. Every spawned worker, anything piped or run inside a session, and
 	any session whose record names a spawner (even resumed by the operator at his
-	terminal) is a worker. An implicit session (an agent started in a main
-	checkout outside spinclass) is not launched by spinclass and gets no pair.
+	terminal) is a worker. Spinclass gives a holder to the sessions it launches.
+	Implicit sessions (an agent started in a main checkout outside spinclass) are
+	an OPEN question, not drivers: they are not launched by spinclass, get no
+	pair today, and the operator's direction is a holder for every session with
+	his agent reaching one only by an explicit blessing
+	(docs/plans/2026-11-25-key-holder.md). A session started again by
+	*start-child-session* or *sc start-stopped* is a worker and gets its own pair.
 	For a session that is not confined this is delegation hygiene, not a
 	boundary. Switching it *"off"* leaves no pair, unit or directory for new
 	sessions. *sc session-key SESSION* prints the session's public key and

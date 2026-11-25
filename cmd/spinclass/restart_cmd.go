@@ -85,6 +85,13 @@ var notifyPrincipalFn = clown.NotifyPrincipalUnderClown
 // runRestartHandoff execs argv directly (never through a shell) in dir with a
 // bounded wait, and returns its trimmed combined output.
 func runRestartHandoff(dir string, argv []string) (string, error) {
+	return runHandoffWithEnv(dir, argv, nil)
+}
+
+// runHandoffWithEnv is runRestartHandoff with an explicit environment: nil
+// inherits the caller's, as the restart hand-off always has; non-nil is the
+// whole environment of the command.
+func runHandoffWithEnv(dir string, argv, env []string) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("the restart hand-off is empty")
 	}
@@ -92,6 +99,7 @@ func runRestartHandoff(dir string, argv []string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
+	cmd.Env = env
 	cmd.WaitDelay = 2 * time.Second
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
