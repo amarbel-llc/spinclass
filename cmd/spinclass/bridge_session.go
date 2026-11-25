@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc"
@@ -70,9 +72,10 @@ func (h *bridgeSessionHandler) Serve(ctx context.Context, conn net.Conn, caller 
 	})
 	// The listener closes conn after Serve returns, so the transport has no
 	// closer of its own.
-	t := bridgeErrorCodes{Transport: transport.NewStdio(conn, conn)}
+	t := bridgeErrorCodes{Transport: transport.NewStdio(conn, conn), conn: conn}
 	tools := h.tools
 	tools.session = caller.SessionKey
+	tools.slots = make(chan struct{}, bridgeMaxInFlight)
 	srv, err := server.New(t, server.Options{
 		ServerName:    h.name,
 		ServerVersion: h.version,
@@ -81,6 +84,8 @@ func (h *bridgeSessionHandler) Serve(ctx context.Context, conn net.Conn, caller 
 	if err != nil {
 		return
 	}
+	// A panic in the server's own goroutine ends this stream, not serve.
+	defer func() { _ = recover() }()
 	_ = srv.Run(ctx)
 }
 
@@ -90,6 +95,58 @@ type bridgeSessionProvider struct {
 	rec      crossingRecorder
 	stats    statsd.Client
 	session  string
+	// slots bounds the calls in flight on one stream; nil is unbounded (a
+	// provider built by hand).
+	slots chan struct{}
+}
+
+const (
+	// bridgeMaxInFlight bounds the calls one session stream has running at
+	// once: a peer that sends requests faster than they finish is refused, not
+	// queued.
+	bridgeMaxInFlight = 8
+)
+
+// bridgeReplyWriteTimeout bounds one reply written to a peer that does not
+// read; tests shorten it.
+var bridgeReplyWriteTimeout = 10 * time.Second
+
+// bridgeSessionLocks serialises the verbs that change a session's lifecycle,
+// per session key: two restart requests of one session never run at once.
+var bridgeSessionLocks sync.Map // session key -> *sync.Mutex
+
+func bridgeLifecycleVerb(name string) bool {
+	switch name {
+	case "restart-this-session", "cancel-restart", "close-this-session":
+		return true
+	}
+	return false
+}
+
+// runGuarded runs one call under the stream's in-flight cap and, for the
+// lifecycle verbs, the session's lock, and turns a panic in the call into an
+// error that does not name its cause (the call's goroutine must not take serve
+// down). A call over the cap is refused with the contract's refusal text.
+func (p bridgeSessionProvider) runGuarded(name string, call func() error) (err error) {
+	if p.slots != nil {
+		select {
+		case p.slots <- struct{}{}:
+			defer func() { <-p.slots }()
+		default:
+			return errors.New(bridgeRefusalPrefix + "this stream already has " + strconv.Itoa(bridgeMaxInFlight) + " calls in flight; wait for one to finish")
+		}
+	}
+	if bridgeLifecycleVerb(name) {
+		mu, _ := bridgeSessionLocks.LoadOrStore(p.session, &sync.Mutex{})
+		mu.(*sync.Mutex).Lock()
+		defer mu.(*sync.Mutex).Unlock()
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("internal error: the call failed")
+		}
+	}()
+	return call()
 }
 
 func (p bridgeSessionProvider) allowed(name string) bool {
@@ -139,7 +196,8 @@ func (p bridgeSessionProvider) ListToolsV1(ctx context.Context, cursor string) (
 
 func (p bridgeSessionProvider) CallTool(ctx context.Context, name string, args json.RawMessage) (*protocol.ToolCallResult, error) {
 	started := time.Now()
-	res, err := p.callTool(ctx, name, args)
+	var res *protocol.ToolCallResult
+	err := p.runGuarded(name, func() (e error) { res, e = p.callTool(ctx, name, args); return })
 	var isErr bool
 	if res != nil {
 		isErr = res.IsError
@@ -164,7 +222,8 @@ func (p bridgeSessionProvider) callTool(ctx context.Context, name string, args j
 
 func (p bridgeSessionProvider) CallToolV1(ctx context.Context, name string, args json.RawMessage) (*protocol.ToolCallResultV1, error) {
 	started := time.Now()
-	res, err := p.callToolV1(ctx, name, args)
+	var res *protocol.ToolCallResultV1
+	err := p.runGuarded(name, func() (e error) { res, e = p.callToolV1(ctx, name, args); return })
 	var isErr bool
 	if res != nil {
 		isErr = res.IsError
@@ -265,6 +324,9 @@ func bridgeArgs(args json.RawMessage) json.RawMessage {
 // tool as InvalidParams, as MCP says.
 type bridgeErrorCodes struct {
 	transport.Transport
+	// conn, when set, gets a write deadline around every reply, so a peer that
+	// stops reading cannot hold a call's goroutine forever.
+	conn net.Conn
 }
 
 func (t bridgeErrorCodes) Write(m *jsonrpc.Message) error {
@@ -275,6 +337,10 @@ func (t bridgeErrorCodes) Write(m *jsonrpc.Message) error {
 		case strings.HasPrefix(m.Error.Message, unknownToolPrefix):
 			m.Error.Code = jsonrpc.InvalidParams
 		}
+	}
+	if t.conn != nil {
+		_ = t.conn.SetWriteDeadline(time.Now().Add(bridgeReplyWriteTimeout))
+		defer func() { _ = t.conn.SetWriteDeadline(time.Time{}) }()
 	}
 	return t.Transport.Write(m)
 }

@@ -49,6 +49,7 @@ const (
 	NotReadyText = "refused: the bridge does not know this unit's cgroup yet; try again shortly"
 
 	writeTimeout      = 2 * time.Second
+	busyWriteTimeout  = 100 * time.Millisecond
 	staleProbeTimeout = time.Second
 	drainTimeout      = 200 * time.Millisecond
 	drainBytes        = 4096
@@ -201,6 +202,7 @@ type Server struct {
 	dead        error
 	ctlMu       sync.Mutex
 	control     net.Conn
+	controlGone chan struct{}
 }
 
 // Listen validates dir and unit and listens on <dir>/bridge.sock with mode
@@ -505,6 +507,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 	}()
 	go s.watchSocket()
+	var backoff time.Duration
 	for {
 		conn, err := s.l.Accept()
 		if err != nil {
@@ -514,15 +517,31 @@ func (s *Server) Serve(ctx context.Context) error {
 			if s.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
+			// A temporary failure (out of descriptors, an aborted connect) is
+			// waited out with a growing pause, not turned into a dead listener
+			// and not spun on.
+			if isTemporaryAcceptError(err) {
+				backoff = nextBackoff(backoff)
+				s.opts.Logf("bridge accept: %v; retrying in %v", err, backoff)
+				if !sleepFor(s.ctx, backoff) {
+					return nil
+				}
+				continue
+			}
 			// The accept loop died on its own: close the server so its
 			// socket does not outlive it, and hand the error to the caller,
 			// which is the one that logs and wakes the holders.
 			_ = s.Close()
 			return fmt.Errorf("bridge accept: %w", err)
 		}
-		if !s.track(conn) {
+		backoff = 0
+		switch s.track(conn) {
+		case trackClosed:
 			_ = conn.Close()
 			return nil
+		case trackFull:
+			s.rejectBusy(conn)
+			continue
 		}
 		s.wg.Add(1)
 		go func() {
@@ -530,6 +549,80 @@ func (s *Server) Serve(ctx context.Context) error {
 			defer s.untrack(conn)
 			s.handle(conn)
 		}()
+	}
+}
+
+const (
+	acceptBackoffMin = 5 * time.Millisecond
+	acceptBackoffMax = time.Second
+	// MaxConnections bounds the connections held at once, from accept: the
+	// streams the contract allows plus a few still reading their hello or being
+	// refused.
+	MaxConnections = bridge.MaxStreamsPerSession + 16
+)
+
+func nextBackoff(cur time.Duration) time.Duration {
+	if cur < acceptBackoffMin {
+		return acceptBackoffMin
+	}
+	if cur *= 2; cur > acceptBackoffMax {
+		return acceptBackoffMax
+	}
+	return cur
+}
+
+// isTemporaryAcceptError reports an accept failure that a later accept can
+// outlive: descriptor or memory pressure, an aborted connection, an interrupt.
+func isTemporaryAcceptError(err error) bool {
+	for _, errno := range []syscall.Errno{syscall.EMFILE, syscall.ENFILE, syscall.ENOBUFS, syscall.ENOMEM, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN} {
+		if errors.Is(err, errno) {
+			return true
+		}
+	}
+	var t interface{ Temporary() bool }
+	return errors.As(err, &t) && t.Temporary()
+}
+
+// sleepFor waits d and reports whether it waited it out (false: ctx ended).
+// Tests replace it.
+var sleepFor = func(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// rejectBusy answers a connection over the cap with ERR busy and closes it,
+// without a goroutine and without waiting on the peer: the reply is one short
+// write on a fresh socket, bounded by a deadline.
+func (s *Server) rejectBusy(conn net.Conn) {
+	started := time.Now()
+	_ = conn.SetWriteDeadline(time.Now().Add(busyWriteTimeout))
+	_, _ = conn.Write(bridge.FormatErr(bridge.CodeBusy, fmt.Sprintf("%d connections are open; the limit is %d per session", MaxConnections, MaxConnections)))
+	_ = conn.Close()
+	s.observe("", bridge.CodeBusy, started)
+}
+
+// closeWait bounds how long Close waits for connection handlers. A handler
+// that ignores its context and its closed connection must not hold the serve
+// process's shutdown; tests shorten it.
+var closeWait = 5 * time.Second
+
+// waitBounded waits for wg for at most d and reports whether it finished.
+func waitBounded(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
 	}
 }
 
@@ -562,6 +655,12 @@ func (s *Server) socketGone() error {
 // server made. A listener on an unlinked inode is silently unreachable, so it
 // is declared dead and the caller is told.
 func (s *Server) watchSocket() {
+	defer func() {
+		if r := recover(); r != nil {
+			s.opts.Logf("bridge: the socket watcher panicked: %v", r)
+			s.declareDead(fmt.Errorf("bridge: the socket watcher panicked: %v", r))
+		}
+	}()
 	tick := s.opts.Tick
 	if tick == nil {
 		tick = func(d time.Duration) (<-chan time.Time, func()) {
@@ -604,7 +703,9 @@ func (s *Server) Close() error {
 		for _, c := range conns {
 			_ = c.Close()
 		}
-		s.wg.Wait()
+		if !waitBounded(&s.wg, closeWait) && s.closeErr == nil {
+			s.closeErr = fmt.Errorf("bridge: handlers were still running %v after close; closing without them", closeWait)
+		}
 		if err := s.removeOwnSocket(); err != nil && s.closeErr == nil {
 			s.closeErr = err
 		}
@@ -612,14 +713,25 @@ func (s *Server) Close() error {
 	return s.closeErr
 }
 
-func (s *Server) track(c net.Conn) bool {
+type trackResult int
+
+const (
+	trackOK trackResult = iota
+	trackClosed
+	trackFull
+)
+
+func (s *Server) track(c net.Conn) trackResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return false
+		return trackClosed
+	}
+	if len(s.conns) >= MaxConnections {
+		return trackFull
 	}
 	s.conns[c] = struct{}{}
-	return true
+	return trackOK
 }
 
 func (s *Server) untrack(c net.Conn) {
@@ -633,7 +745,14 @@ func (s *Server) caller() Caller {
 	return Caller{SessionKey: s.opts.SessionKey, Unit: s.unit, Transport: TransportBridge}
 }
 
+// observe hands one connection's outcome to the Observer. A panicking Observer
+// is the Observer's bug, not the connection's: it is logged and swallowed.
 func (s *Server) observe(service, outcome string, started time.Time) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.opts.Logf("bridge: the observer panicked: %v", r)
+		}
+	}()
 	s.opts.Observer.Crossing(Event{Service: service, Outcome: outcome, Duration: time.Since(started), Caller: s.caller()})
 }
 
@@ -657,47 +776,58 @@ func (s *Server) refuse(conn net.Conn, errLine []byte) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(conn, drainBytes))
 }
 
+// handle serves one accepted connection and observes it exactly once, however
+// it ends: a refusal, a hello that never came, a peer that went away, a failed
+// reply, a served stream, or a panic (which is recovered here, in the
+// connection's own goroutine, and counted as an error).
 func (s *Server) handle(conn net.Conn) {
 	started := time.Now()
+	service, outcome := "", bridge.CodeError
+	defer func() {
+		if r := recover(); r != nil {
+			s.opts.Logf("bridge: a connection handler panicked: %v", r)
+			outcome = bridge.CodeError
+		}
+		s.observe(service, outcome, started)
+	}()
+
 	if text, err := s.checkPeer(conn); err != nil {
 		s.refused.Add(1)
 		s.opts.Logf("bridge refused a peer outside unit %s: %v", s.unit, err)
 		s.refuse(conn, bridge.FormatErr(bridge.CodeRefused, text))
-		s.observe("", bridge.CodeRefused, started)
+		outcome = bridge.CodeRefused
 		return
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(s.opts.HelloTimeout))
 	h, err := bridge.ReadHello(conn)
 	if err != nil {
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			s.observe("", "hello-timeout", started)
-			return
-		}
-		if errors.Is(err, bridge.ErrMalformed) || errors.Is(err, bridge.ErrTooLong) {
+		switch {
+		case errors.Is(err, os.ErrDeadlineExceeded):
+			outcome = "hello-timeout"
+		case errors.Is(err, bridge.ErrMalformed) || errors.Is(err, bridge.ErrTooLong):
 			s.opts.Logf("bridge hello refused: %v", err)
 			s.refuse(conn, bridge.MalformedReply())
-			s.observe("", bridge.CodeError, started)
 		}
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
+	service = h.Service
 
 	rep, accept := bridge.Decide(h, s.opts.Served())
 	if !accept {
 		s.refuse(conn, rep)
-		code := bridge.CodeUnknownService
+		outcome = bridge.CodeUnknownService
 		if h.Major != bridge.ServerMajor {
-			code = bridge.CodeVersion
+			outcome = bridge.CodeVersion
 		}
-		s.observe(h.Service, code, started)
 		return
 	}
 
 	release, busy := s.reserve(h.Service)
 	if busy != "" {
 		s.refuse(conn, bridge.FormatErr(bridge.CodeBusy, busy))
-		s.observe(h.Service, bridge.CodeBusy, started)
+		outcome = bridge.CodeBusy
 		return
 	}
 	defer release()
@@ -710,7 +840,7 @@ func (s *Server) handle(conn net.Conn) {
 	case ServiceSession:
 		s.opts.Handler.Serve(s.ctx, conn, s.caller())
 	}
-	s.observe(h.Service, "ok", started)
+	outcome = "ok"
 }
 
 // reserve takes a stream slot (and the control slot for control) or says why
@@ -738,21 +868,50 @@ func (s *Server) reserve(service string) (release func(), busy string) {
 	}, ""
 }
 
-// serveControl keeps the control stream open until the peer closes it or the
+// controlProbeInterval is how often a control stream whose peer stopped
+// sending is checked for a peer that went away. Tests shorten it.
+var controlProbeInterval = 500 * time.Millisecond
+
+// serveControl keeps the control stream open until the peer goes away or the
 // server ends; the peer's bytes are discarded (the control service reads
-// nothing from the shim yet).
+// nothing from the shim yet). The shim writes nothing after its hello, and a
+// peer that only shut its write side (EOF on our read) is still listening, so
+// EOF alone does not end the stream: it ends on a read error, a write that
+// fails (Push, or the periodic probe of a peer that is fully gone), or the
+// server's end.
 func (s *Server) serveControl(conn net.Conn) {
+	gone := make(chan struct{})
 	s.ctlMu.Lock()
 	s.control = conn
+	s.controlGone = gone
 	s.ctlMu.Unlock()
 	defer func() {
 		s.ctlMu.Lock()
 		if s.control == conn {
 			s.control = nil
+			s.controlGone = nil
 		}
 		s.ctlMu.Unlock()
 	}()
-	_, _ = io.Copy(io.Discard, conn)
+	if _, err := io.Copy(io.Discard, conn); err != nil {
+		return
+	}
+	probe := time.NewTicker(controlProbeInterval)
+	defer probe.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-gone:
+			return
+		case <-probe.C:
+			// A zero-length write moves no bytes; it fails once the peer
+			// closed its end.
+			if _, err := conn.Write(nil); err != nil {
+				return
+			}
+		}
+	}
 }
 
 // Push writes one NDJSON frame to the open control stream. It is the future
@@ -768,9 +927,16 @@ func (s *Server) Push(f Frame) error {
 	if s.control == nil {
 		return ErrNoControl
 	}
-	_ = s.control.SetWriteDeadline(time.Now().Add(writeTimeout))
-	defer func() { _ = s.control.SetWriteDeadline(time.Time{}) }()
-	if _, err := s.control.Write(b); err != nil {
+	c := s.control
+	_ = c.SetWriteDeadline(time.Now().Add(writeTimeout))
+	defer func() { _ = c.SetWriteDeadline(time.Time{}) }()
+	if _, err := c.Write(b); err != nil {
+		// A control stream that cannot be written is over: free its slot.
+		if s.controlGone != nil {
+			close(s.controlGone)
+			s.controlGone = nil
+		}
+		s.control = nil
 		return fmt.Errorf("bridge: pushing %q on the control stream: %w", f.Type, err)
 	}
 	return nil
