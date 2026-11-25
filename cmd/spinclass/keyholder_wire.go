@@ -45,6 +45,14 @@ func realKeyholderLauncher(tools keyholder.Tools) (*keyholder.Launcher, error) {
 // them from flags because that person chose them. A session launch never does
 // (it goes through realKeyholderLauncher and the trusted settings).
 func launcherForTools(fibby, piggy string) (*keyholder.Launcher, error) {
+	return launcherForToolsAndSystemd(fibby, piggy, "", "")
+}
+
+// launcherForToolsAndSystemd is launcherForTools plus the absolute paths of
+// systemd-run and systemctl the same person chose, for a build that has no pins
+// for them (a dev build): an empty value falls back to the build's pin and, with
+// no pin either, the runner refuses. Never to a name looked up on PATH.
+func launcherForToolsAndSystemd(fibby, piggy, systemdRun, systemctl string) (*keyholder.Launcher, error) {
 	for _, p := range []struct{ name, path string }{{"fibby", fibby}, {"piggy", piggy}} {
 		if p.path == "" {
 			return nil, fmt.Errorf("%s is not named: pass --fibby and --piggy (absolute paths); a session launch reads [keyholder] fibby and piggy instead, and a pair is never started from a name looked up on PATH", p.name)
@@ -53,7 +61,14 @@ func launcherForTools(fibby, piggy string) (*keyholder.Launcher, error) {
 			return nil, fmt.Errorf("the %s %q is not an absolute path", p.name, p.path)
 		}
 	}
-	return newKeyholderLauncher(keyholder.Tools{Fibby: fibby, Piggy: piggy}), nil
+	for _, p := range []struct{ name, path string }{{"systemd-run", systemdRun}, {"systemctl", systemctl}} {
+		if p.path != "" && !filepath.IsAbs(p.path) {
+			return nil, fmt.Errorf("the %s %q is not an absolute path", p.name, p.path)
+		}
+	}
+	l := newKeyholderLauncher(keyholder.Tools{Fibby: fibby, Piggy: piggy})
+	l.Run = keyholder.SystemdRunner{RunBin: systemdRun, CtlBin: systemctl}
+	return l, nil
 }
 
 func newKeyholderLauncher(tools keyholder.Tools) *keyholder.Launcher {

@@ -409,6 +409,7 @@
             gateGit ? null,
             gateSh ? null,
             openssh ? null,
+            systemd ? null,
           }:
           pkgs.buildGoAuto {
             pname = "spinclass";
@@ -453,6 +454,13 @@
             ++ (lib.optionals (openssh != null) [
               "-X main.sshAddBin=${openssh}/bin/ssh-add"
               "-X main.sshKeygenBin=${openssh}/bin/ssh-keygen"
+            ])
+            # The key holder pair launcher runs `systemd-run --user` and asks about
+            # units with `systemctl --user`: pinned for the same reason, and an
+            # unpinned build refuses to run a unit instead of using PATH.
+            ++ (lib.optionals (systemd != null) [
+              "-X main.systemdRunBin=${systemd}/bin/systemd-run"
+              "-X main.systemctlBin=${systemd}/bin/systemctl"
             ]);
 
             # godyn-only knobs (buildGodynModule).
@@ -597,6 +605,8 @@
           gateSh = pkgs.bash;
           # sc session-key's ssh-add and ssh-keygen (key holder).
           inherit (pkgs) openssh;
+          # The key holder pair launcher's systemd-run and systemctl.
+          inherit (pkgs) systemd;
         };
 
         spinclass-race = pkgs.buildGoRace { base = mkSpinclass { }; };

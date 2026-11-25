@@ -34,6 +34,8 @@ func registerKeyholderPairCommand(app *command.App) {
 			{Name: "session", Type: command.String, Required: true, Description: "The session key the pair is named for"},
 			{Name: "fibby", Type: command.String, Description: "Absolute path of the fibby holder build to run (both flags are required here: only a session launch reads [keyholder] fibby from the sweatfile)"},
 			{Name: "piggy", Type: command.String, Description: "Absolute path of the piggy binary to run (both flags are required here: only a session launch reads [keyholder] piggy from the sweatfile)"},
+			{Name: "systemd-run", Type: command.String, Description: "Absolute path of systemd-run, for a build that has no pin for it (a dev build); a production build uses its pin and never looks the name up on PATH"},
+			{Name: "systemctl", Type: command.String, Description: "Absolute path of systemctl, for a build that has no pin for it (a dev build); a production build uses its pin and never looks the name up on PATH"},
 		},
 		RunCLI: runKeyholderPair,
 	})
@@ -45,6 +47,8 @@ func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
 		Session string `json:"session"`
 		Fibby   string `json:"fibby"`
 		Piggy   string `json:"piggy"`
+		Run     string `json:"systemd-run"`
+		Ctl     string `json:"systemctl"`
 	}
 	if err := json.Unmarshal(args, &f); err != nil {
 		return fmt.Errorf("keyholder-pair: %w", err)
@@ -54,7 +58,9 @@ func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
 	}
 	launcher := func() (*keyholder.Launcher, error) { return keyholderLauncherFn(keyholder.Tools{}) }
 	if f.Fibby != "" || f.Piggy != "" {
-		launcher = func() (*keyholder.Launcher, error) { return launcherForTools(f.Fibby, f.Piggy) }
+		launcher = func() (*keyholder.Launcher, error) {
+			return launcherForToolsAndSystemd(f.Fibby, f.Piggy, f.Run, f.Ctl)
+		}
 	}
 	l, err := launcher()
 	if err != nil {

@@ -12,8 +12,13 @@ import (
 
 // SystemdRunner runs units with `systemd-run --user` and asks about them with
 // `systemctl --user`. Every call is bounded by Timeout (ten seconds if zero).
+// The two programs are the absolute paths in RunBin and CtlBin when a person at
+// a terminal named them, else the build's pins (SetSystemdPins); never a name
+// looked up on PATH (see systempins.go).
 type SystemdRunner struct {
 	Timeout time.Duration
+	RunBin  string
+	CtlBin  string
 }
 
 func (r SystemdRunner) ctx(parent context.Context) (context.Context, context.CancelFunc) {
@@ -27,6 +32,10 @@ func (r SystemdRunner) ctx(parent context.Context) (context.Context, context.Can
 // Start runs argv as a transient service. --collect removes the unit when it
 // stops, so a stopped pair leaves no failed unit behind; Restart stays off.
 func (r SystemdRunner) Start(ctx context.Context, unit string, argv, env []string) error {
+	bin, err := r.runBin()
+	if err != nil {
+		return err
+	}
 	ctx, cancel := r.ctx(ctx)
 	defer cancel()
 	args := []string{"--user", "--quiet", "--collect", "--unit=" + unit, "--property=KillMode=control-group"}
@@ -35,24 +44,29 @@ func (r SystemdRunner) Start(ctx context.Context, unit string, argv, env []strin
 	}
 	args = append(args, "--")
 	args = append(args, argv...)
-	out, err := exec.CommandContext(ctx, "systemd-run", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("systemd-run %s: %w: %s", unit, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
-// Active reports whether the unit is active (exit status 0 of is-active).
+// Active reports whether the unit is active (exit status 0 of is-active). Only
+// exit 3 (inactive) and 4 (no such unit) mean "not running"; any other failure,
+// such as no user bus, is an error and is never read as a stopped pair.
 func (r SystemdRunner) Active(ctx context.Context, unit string) (bool, error) {
+	bin, err := r.ctlBin()
+	if err != nil {
+		return false, err
+	}
 	ctx, cancel := r.ctx(ctx)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "systemctl", "--user", "is-active", unit).Output()
+	out, err := exec.CommandContext(ctx, bin, "--user", "is-active", unit).Output()
 	if err == nil {
 		return strings.TrimSpace(string(out)) == "active", nil
 	}
 	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		// 3 is "inactive", 4 is "no such unit": both mean not running.
+	if errors.As(err, &ee) && (ee.ExitCode() == 3 || ee.ExitCode() == 4) {
 		return false, nil
 	}
 	return false, fmt.Errorf("systemctl is-active %s: %w", unit, err)
@@ -60,9 +74,13 @@ func (r SystemdRunner) Active(ctx context.Context, unit string) (bool, error) {
 
 // ListUnits returns the loaded key holder units, in any state, by name.
 func (r SystemdRunner) ListUnits(ctx context.Context) ([]string, error) {
+	bin, err := r.ctlBin()
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := r.ctx(ctx)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "systemctl", "--user", "list-units", "--all", "--plain", "--no-legend", "--no-pager", "spinclass-keyholder-*").Output()
+	out, err := exec.CommandContext(ctx, bin, "--user", "list-units", "--all", "--plain", "--no-legend", "--no-pager", "spinclass-keyholder-*").Output()
 	if err != nil {
 		return nil, fmt.Errorf("systemctl list-units: %w", err)
 	}
@@ -77,9 +95,13 @@ func (r SystemdRunner) ListUnits(ctx context.Context) ([]string, error) {
 
 // Stop stops the unit. A unit that is not loaded is already stopped.
 func (r SystemdRunner) Stop(ctx context.Context, unit string) error {
+	bin, err := r.ctlBin()
+	if err != nil {
+		return err
+	}
 	ctx, cancel := r.ctx(ctx)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "systemctl", "--user", "stop", unit).CombinedOutput()
+	out, err := exec.CommandContext(ctx, bin, "--user", "stop", unit).CombinedOutput()
 	if err != nil && !bytes.Contains(out, []byte("not loaded")) {
 		return fmt.Errorf("systemctl stop %s: %w: %s", unit, err, strings.TrimSpace(string(out)))
 	}

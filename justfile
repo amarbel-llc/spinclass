@@ -2090,7 +2090,9 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     say() { printf 'live: %s\n' "$*"; }
     load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
     if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
-    out="$(nix build .#spinclass-native --no-link --print-out-paths 2>/dev/null | tail -1)"
+    # `.#default` carries the tool pins (systemd-run, systemctl, ssh-add, ssh-keygen); `.#spinclass-native` has none and
+    # the key holder refuses to look any of them up on PATH.
+    out="$(nix build .#default --no-link --print-out-paths 2>/dev/null | tail -1)"
     sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built at $out"; exit 1; }
     piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(command -v piggy)" || { say "no piggy on PATH"; exit 1; }
     fibby="{{ fibby }}"
@@ -2146,7 +2148,9 @@ debug-session-key-capture fibby="" piggy="":
     load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
     if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
     here="$PWD"
-    out="$(nix build .#spinclass-native --no-link --print-out-paths 2>/dev/null | tail -1)"
+    # `.#default` carries the tool pins (systemd-run, systemctl, ssh-add, ssh-keygen); `.#spinclass-native` has none and
+    # the key holder refuses to look any of them up on PATH.
+    out="$(nix build .#default --no-link --print-out-paths 2>/dev/null | tail -1)"
     sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built at $out"; exit 1; }
     piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(command -v piggy)" || { say "no piggy on PATH"; exit 1; }
     fibby="{{ fibby }}"

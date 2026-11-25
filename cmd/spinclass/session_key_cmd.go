@@ -17,26 +17,36 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
-// sshAddBin and sshKeygenBin are the absolute store paths of ssh-add and
-// ssh-keygen, burned in by lib.mkSpinclass (-X main.sshAddBin=...). Like the
-// other tool pins an empty value means the bare name is resolved from PATH.
+// The absolute store paths of ssh-add, ssh-keygen, systemd-run and systemctl,
+// burned in by lib.mkSpinclass (-X main.sshAddBin=...). Unlike the other tool
+// pins, an empty value here is NOT "look the name up on PATH": the key holder
+// runs in whatever process starts or inspects a session, and a name resolved
+// from a PATH a session can influence is the hole (the same rule the fibby and
+// piggy settings state). An unpinned build (go test, a dev build) refuses,
+// naming the pin; the tests set these variables themselves.
 var (
-	sshAddBin    = ""
-	sshKeygenBin = ""
+	sshAddBin     = ""
+	sshKeygenBin  = ""
+	systemdRunBin = ""
+	systemctlBin  = ""
 )
 
-func sessionKeySSHAdd() string {
-	if sshAddBin != "" {
-		return sshAddBin
+func init() { keyholder.SetSystemdPins(systemdRunBin, systemctlBin) }
+
+// errSessionKeyToolUnpinned is what a build without a tool's pin yields.
+var errSessionKeyToolUnpinned = errors.New("this build has no pinned path for the tool and the key holder never looks a tool up on PATH")
+
+func pinnedSessionKeyTool(name, pin string) (string, error) {
+	if pin == "" {
+		return "", fmt.Errorf("session-key: %s: %w (pins are burned in by lib.mkSpinclass: -X main.%s)", name, errSessionKeyToolUnpinned, map[string]string{"ssh-add": "sshAddBin", "ssh-keygen": "sshKeygenBin"}[name])
 	}
-	return "ssh-add"
+	return pin, nil
 }
 
-func sessionKeySSHKeygen() string {
-	if sshKeygenBin != "" {
-		return sshKeygenBin
-	}
-	return "ssh-keygen"
+func sessionKeySSHAdd() (string, error) { return pinnedSessionKeyTool("ssh-add", sshAddBin) }
+
+func sessionKeySSHKeygen() (string, error) {
+	return pinnedSessionKeyTool("ssh-keygen", sshKeygenBin)
 }
 
 // Seams for command tests.
@@ -53,13 +63,21 @@ var (
 	// sessionKeyAgentList runs `ssh-add -L` against sock and nothing else: the
 	// environment is PATH, HOME and that one socket, never the operator's agent.
 	sessionKeyAgentList = func(ctx context.Context, sock string) ([]byte, error) {
-		cmd := exec.CommandContext(ctx, sessionKeySSHAdd(), "-L")
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "SSH_AUTH_SOCK=" + sock}
+		bin, err := sessionKeySSHAdd()
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, bin, "-L")
+		cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "SSH_AUTH_SOCK=" + sock}
 		return cmd.Output()
 	}
 	// sessionKeyFingerprint prints the SHA256 fingerprint of one public key line.
 	sessionKeyFingerprint = func(ctx context.Context, pub string) (string, error) {
-		cmd := exec.CommandContext(ctx, sessionKeySSHKeygen(), "-lf", "-")
+		bin, err := sessionKeySSHKeygen()
+		if err != nil {
+			return "", err
+		}
+		cmd := exec.CommandContext(ctx, bin, "-lf", "-")
 		cmd.Stdin = strings.NewReader(pub + "\n")
 		out, err := cmd.Output()
 		if err != nil {
@@ -75,7 +93,11 @@ var (
 	// is handed over as bytes on stdin, so a file swapped after it was checked is
 	// never what ssh-keygen reads.
 	sessionKeyCertList keyholder.CertLister = func(ctx context.Context, cert []byte) (string, error) {
-		cmd := exec.CommandContext(ctx, sessionKeySSHKeygen(), "-L", "-f", "/dev/stdin")
+		bin, err := sessionKeySSHKeygen()
+		if err != nil {
+			return "", err
+		}
+		cmd := exec.CommandContext(ctx, bin, "-L", "-f", "/dev/stdin")
 		cmd.Stdin = bytes.NewReader(cert)
 		out, err := cmd.Output()
 		return string(out), err

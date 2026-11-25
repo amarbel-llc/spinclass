@@ -139,6 +139,36 @@ frontend running inside such a directory's direnv. The scope prefix's
 *systemd-run* is not pinned: it comes from the scope tier, and goes through
 the same refusal.
 
+## openssh, systemd
+
+The per-session key holder (*spinclass-sweatfile*(5), *[keyholder]*) runs a
+pair of programs outside every unit that holds a session's key, in whatever
+process starts or inspects a session: for *spawn-session* that is a driver
+session's own *spinclass serve*, whose *PATH* a session can influence. Four
+tools are therefore burned in as absolute store paths, and the key holder
+never looks any of them up on *PATH*:
+
+- *ssh-add* and *ssh-keygen* (the *openssh* input, *-X main.sshAddBin* and
+  *-X main.sshKeygenBin*): *sc session-key* asks a session's holder for its
+  public key with *ssh-add -L*, fingerprints it, and inspects an installed
+  certificate with *ssh-keygen -L*.
+- *systemd-run* and *systemctl* (the *systemd* input, *-X main.systemdRunBin*
+  and *-X main.systemctlBin*): the pair is started as transient *systemd-run
+  --user* units and asked about, listed and stopped with *systemctl --user*.
+
+Unlike the other pins an empty value here is NOT "resolve the name from
+*PATH*": a build without the pins (a plain *go build*, a test binary, or
+*.#spinclass-native*) refuses to start, inspect or stop a pair and says which
+pin is missing. The shipped builds (*packages.default*, *spinclass-build_go_application*)
+carry all four. A person at a terminal using such a build may pass absolute
+paths to the hidden *sc keyholder-pair* (*--systemd-run*, *--systemctl*, with
+*--fibby* and *--piggy*); a session launch never takes a path from a person.
+
+The two programs that actually hold the key, *fibby* and *piggy*, are not
+build pins at all: the host's configuration writes their store paths into the
+trusted *[keyholder]* *fibby* and *piggy* settings, so one piggy runs on a
+host and the holder and the agent never disagree on a version.
+
 # SEE ALSO
 
 *spinclass*(1), *spinclass-sweatfile*(5), *madder*(1), *direnv*(1), *dodder*(1)
