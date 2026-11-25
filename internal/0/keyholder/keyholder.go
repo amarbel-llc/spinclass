@@ -64,10 +64,10 @@ type Launcher struct {
 
 // Pair is a started pair.
 type Pair struct {
-	Session   string    `json:"session"`
-	FibbyUnit string    `json:"fibby_unit"`
-	AgentUnit string    `json:"agent_unit"`
-	PublicKey string    `json:"public_key"`
+	Session   string `json:"session"`
+	FibbyUnit string `json:"fibby_unit"`
+	AgentUnit string `json:"agent_unit"`
+	PublicKey string `json:"public_key"`
 	// Fingerprint is the key's SHA256 fingerprint, recorded at the mint.
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	MintedAt    time.Time `json:"minted_at"`
