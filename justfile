@@ -2110,6 +2110,83 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     say "after stop: units=$units processes='${procs}' directories=$dirs"
     if [ "$units" = 0 ] && [ -z "$procs" ] && [ "$dirs" = 0 ]; then say "LIVE-OK one pair started, listed one key, stopped, nothing left"; else say "FAIL: leftovers"; exit 1; fi
 
+# Key holder probe B: a holder key minted OUTSIDE a unit is usable from INSIDE a real full unit. Starts a
+# throwaway fibby + holder pair (virtual card, no real card, no PIN), mints one key, then runs clown's
+# `agent-scope-run` with a spec whose sockets[] binds ONLY the holder's agent socket and whose env sets
+# SSH_AUTH_SOCK to it; inside the unit it prints `ssh-add -L`, makes one signature, and reports whether the operator's
+# real agent path is visible (present/absent only; the operator's socket is never used). Tears down the unit and
+# the pair and asserts no leftover. Refuses while per-cpu 1-minute load is 1.0 or more; ONE unit per run.
+# CLOWN_REV defaults to the clown commit carrying the Validate rule (SSH_AUTH_SOCK only to a bound socket).
+#
+# run one real full unit with the holder's socket bound in and prove a key minted outside is usable inside
+[group("debug")]
+debug-keyholder-unit-probe fibby="" piggy="" clown="" clown_rev="f502df21ae7d5420c73ca62ebd94cc272566b2bf":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    say() { printf 'unit-probe: %s\n' "$*"; }
+    load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
+    if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
+    operator_sock="${SSH_AUTH_SOCK:-}"; operator_piggy="${PIGGY_AUTH_SOCK:-}"
+    piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(command -v piggy)" || { say "no piggy on PATH"; exit 1; }
+    fibby="{{ fibby }}"
+    if [ -z "$fibby" ]; then for c in /nix/store/*-fibby-holder-0.1.0/bin/fibby; do fibby="$c"; done; fi
+    [ -x "$fibby" ] || { say "no fibby holder build found"; exit 1; }
+    clown="{{ clown }}"
+    if [ -z "$clown" ]; then
+      ref="https://code.linenisgreat.com/clown/archive/{{ clown_rev }}.tar.gz#default"
+      say "building clown from $ref"
+      clown="$(timeout 1500 nix build --no-link --print-out-paths "$ref" 2>"$PWD/.tmp/clown-build.err" | tail -1)"
+    fi
+    [ -x "$clown/bin/clown" ] || { say "no clown at '$clown'"; tail -n 5 "$PWD/.tmp/clown-build.err" 2>/dev/null; exit 1; }
+    say "clown=$clown"
+    base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/khu.XXXXXX")"; chmod 0700 "$base"
+    mkdir -m 0700 "$base/fibby" "$base/agent" "$base/res"
+    wt="$(mktemp -d "$PWD/.tmp/khu-wt.XXXXXX")"
+    ctl="$base/fibby/ctl.sock"; pcsc="$base/fibby/pcscd.comm"; agent="$base/agent/agent.sock"
+    printf '#!/bin/sh\necho "REFUSING to prompt" >&2\nexit 1\n' >"$base/askpass"; chmod 0700 "$base/askpass"
+    export SSH_ASKPASS="$base/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="" PCSCLITE_CSOCK_NAME="$pcsc"
+    unset WAYLAND_DISPLAY SSH_AUTH_SOCK PIGGY_AUTH_SOCK
+    pids=()
+    cleanup() {
+      kill "${pids[@]}" 2>/dev/null || true
+      sleep 1
+      left="$(pgrep -f "$base" || true)"
+      units="$(systemctl --user list-units --all --no-legend 2>/dev/null | grep -c 'keyholder-probe' || true)"
+      say "after teardown: processes naming the pair dir='${left}' units naming keyholder-probe=$units"
+      rm -rf "$base" "$wt"
+    }
+    trap cleanup EXIT
+    "$fibby" --socket "$pcsc" --control-socket "$ctl" --model yk5.7 >"$base/fibby.log" 2>&1 &
+    pids+=($!)
+    for _ in $(seq 1 50); do [ -S "$ctl" ] && [ -S "$pcsc" ] && break; sleep 0.1; done
+    timeout 60 "$fibby" ctl --socket "$ctl" destroy "Virtual PCD piggy fibby 00 00" >/dev/null 2>&1 || true
+    "$piggy" agent --holder --holder-fibby-ctl "$ctl" --scope probe-v1=any -a "$agent" >"$base/agent.log" 2>&1 &
+    pids+=($!)
+    for _ in $(seq 1 50); do [ -S "$agent" ] && break; sleep 0.1; done
+    [ -S "$agent" ] || { say "agent socket never appeared"; sed 's/^/agent.log: /' "$base/agent.log"; exit 1; }
+    SSH_AUTH_SOCK="$agent" timeout 60 "$piggy" holder mint --scope probe-v1 >"$wt/holder.pub" 2>"$base/mint.err" || { say "mint failed"; head -c 300 "$base/mint.err"; exit 1; }
+    say "outside: ssh-add -L: $(SSH_AUTH_SOCK="$agent" timeout 30 ssh-add -L 2>&1 | awk '{print $1}')"
+    say "outside: fingerprint: $(ssh-keygen -lf "$wt/holder.pub" 2>&1)"
+    jq -n --arg wt "$wt" --arg home "$HOME" --arg res "$base/res/result.json" --arg sock "$agent" \
+      '{version:1, worktree:$wt, operator_home:$home, unit_name_hint:"keyholder-probe", result_path:$res,
+        sockets:[{path:$sock, purpose:"key-holder"}], env:{SSH_AUTH_SOCK:$sock}}' >"$base/spec.json"
+    inner='echo "sock=$SSH_AUTH_SOCK"; echo "inside: ssh-add -L:"; ssh-add -L 2>&1 | awk '"'"'{print "  " $1 " " $NF}'"'"'; ssh-add -l 2>&1 | sed "s/^/  fp: /";'
+    inner+=' printf hello > '"$wt"'/m; ssh-keygen -Y sign -U -f '"$wt"'/holder.pub -n probe '"$wt"'/m 2>&1 | sed "s/^/  sign: /"; echo "  sign rc=${PIPESTATUS[0]}";'
+    for p in "$operator_sock" "$operator_piggy"; do
+      [ -n "$p" ] || continue
+      inner+=' if test -e '"'$p'"'; then echo OPERATOR-AGENT-VISIBLE; else echo operator-agent-absent; fi;'
+    done
+    [ -n "$operator_sock$operator_piggy" ] || inner+=' echo "operator-agent-path-not-in-outer-env";'
+    say "running the unit (one run)"
+    # agent-scope-run refuses a working directory outside the worktree
+    cd "$wt"
+    timeout 300 "$clown/bin/clown" agent-scope-run --spec "$base/spec.json" -- bash -c "$inner" </dev/null 2>&1 | grep -v 'agent scope: environment:' | sed 's/^/unit: /'
+    rc="${PIPESTATUS[0]}"
+    say "agent-scope-run rc=$rc"
+    [ -f "$base/res/result.json" ] && say "result: $(jq -c '{unit, exit_code, main_pid}' "$base/res/result.json" 2>&1)"
+    say "systemctl --user clown-agent units now: $(systemctl --user list-units --all --no-legend 2>/dev/null | grep -c 'clown-agent' || true)"
+
 # [explore] Poll a worker's record every few seconds and print ONE line per change
 # (UTC time, request queued, restarting_at, restarted_at, claude pid, recorded pid,
 # peek state) until restarted_at is set after restarting_at, or `limit` seconds
