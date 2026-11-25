@@ -1,0 +1,349 @@
+package bridge
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// gen builds a long string without writing it out in the vectors file.
+type gen struct {
+	Prefix string `json:"prefix"`
+	Repeat string `json:"repeat"`
+	N      int    `json:"n"`
+	Suffix string `json:"suffix"`
+}
+
+func (g *gen) String() string {
+	return g.Prefix + strings.Repeat(g.Repeat, g.N) + g.Suffix
+}
+
+// vector is one case of testdata/vectors.json. The file is the contract: the
+// clown owner vendors it and drives the same cases (see the wire doc).
+type vector struct {
+	Name       string   `json:"name"`
+	Op         string   `json:"op"`
+	Input      string   `json:"input"`
+	InputGen   *gen     `json:"input_gen"`
+	Served     []string `json:"served"`
+	ParseErr   string   `json:"parse_err"`
+	Major      int      `json:"major"`
+	Service    string   `json:"service"`
+	ServiceGen *gen     `json:"service_gen"`
+	Reply      string   `json:"reply"`
+	ReplyGen   *gen     `json:"reply_gen"`
+	Accept     bool     `json:"accept"`
+	Rest       string   `json:"rest"`
+	OK         bool     `json:"ok"`
+	Code       string   `json:"code"`
+	Text       string   `json:"text"`
+	TextGen    *gen     `json:"text_gen"`
+}
+
+func (v vector) input() string {
+	if v.InputGen != nil {
+		return v.InputGen.String()
+	}
+	return v.Input
+}
+
+func (v vector) wantReply() string {
+	if v.ReplyGen != nil {
+		return v.ReplyGen.String()
+	}
+	return v.Reply
+}
+
+func (v vector) wantService() string {
+	if v.ServiceGen != nil {
+		return v.ServiceGen.String()
+	}
+	return v.Service
+}
+
+func (v vector) text() string {
+	if v.TextGen != nil {
+		return v.TextGen.String()
+	}
+	return v.Text
+}
+
+func loadVectors(t *testing.T) []vector {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "vectors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vs []vector
+	if err := json.Unmarshal(b, &vs); err != nil {
+		t.Fatal(err)
+	}
+	if len(vs) == 0 {
+		t.Fatal("no vectors")
+	}
+	return vs
+}
+
+func errClass(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrTooLong):
+		return "too-long"
+	case errors.Is(err, ErrMalformed):
+		return "malformed"
+	}
+	return "other: " + err.Error()
+}
+
+var reservedLabels = []string{"egress", "control", "session", "hook", "chat", "model", "keys", "status"}
+
+func servedSet(v vector) map[string]bool {
+	labels := v.Served
+	if labels == nil {
+		labels = reservedLabels
+	}
+	m := map[string]bool{}
+	for _, l := range labels {
+		m[l] = true
+	}
+	return m
+}
+
+// onlyOneByte fails the test if a reader is asked for more than one byte at a
+// time: that is what keeps service bytes out of the handshake's buffers.
+type onlyOneByte struct {
+	t *testing.T
+	r io.Reader
+}
+
+func (o onlyOneByte) Read(p []byte) (int, error) {
+	if len(p) > 1 {
+		o.t.Errorf("a read asked for %d bytes; the handshake must read one byte at a time", len(p))
+		p = p[:1]
+	}
+	return o.r.Read(p)
+}
+
+func TestVectors(t *testing.T) {
+	for _, v := range loadVectors(t) {
+		t.Run(v.Name, func(t *testing.T) {
+			switch v.Op {
+			case "hello":
+				runHello(t, v)
+			case "reply":
+				runReply(t, v)
+			case "format-err":
+				if got := string(FormatErr(v.Code, v.text())); got != v.wantReply() {
+					t.Errorf("FormatErr(%q, ...) = %q, want %q", v.Code, got, v.wantReply())
+				}
+			default:
+				t.Fatalf("unknown op %q", v.Op)
+			}
+		})
+	}
+}
+
+func runHello(t *testing.T, v vector) {
+	in := v.input()
+
+	// The stream reader: stops at the newline or at 64 bytes, never past.
+	rd := bytes.NewReader([]byte(in))
+	h, err := ReadHello(onlyOneByte{t, rd})
+	if got := errClass(err); got != v.ParseErr {
+		t.Fatalf("ReadHello error class = %q (%v), want %q", got, err, v.ParseErr)
+	}
+	if v.ParseErr == "" {
+		if h.Major != v.Major || h.Service != v.wantService() {
+			t.Errorf("ReadHello = %+v, want major %d service %q", h, v.Major, v.wantService())
+		}
+		if rest := in[len(in)-rd.Len():]; rest != v.Rest {
+			t.Errorf("ReadHello left %q unread, want %q", rest, v.Rest)
+		}
+	} else if rd.Len() < len(in)-MaxHelloBytes {
+		t.Errorf("ReadHello consumed %d bytes, more than %d", len(in)-rd.Len(), MaxHelloBytes)
+	}
+
+	// The line parser sees the line the stream reader would have delivered.
+	line := in
+	if i := strings.IndexByte(in, '\n'); i >= 0 {
+		line = in[:i+1]
+	}
+	ph, perr := ParseHello([]byte(line))
+	if got := errClass(perr); got != v.ParseErr {
+		t.Fatalf("ParseHello error class = %q (%v), want %q", got, perr, v.ParseErr)
+	}
+	if perr == nil && ph != h {
+		t.Errorf("ParseHello = %+v, ReadHello = %+v", ph, h)
+	}
+
+	var reply []byte
+	var accept bool
+	if perr != nil {
+		reply, accept = MalformedReply(), false
+	} else {
+		reply, accept = Decide(ph, servedSet(v))
+	}
+	if string(reply) != v.wantReply() || accept != v.Accept {
+		t.Errorf("answer = %q accept %v, want %q accept %v", reply, accept, v.wantReply(), v.Accept)
+	}
+}
+
+func runReply(t *testing.T, v vector) {
+	in := v.input()
+	rd := bytes.NewReader([]byte(in))
+	ok, code, text, err := ReadReply(onlyOneByte{t, rd})
+	if got := errClass(err); got != v.ParseErr {
+		t.Fatalf("ReadReply error class = %q (%v), want %q", got, err, v.ParseErr)
+	}
+	if v.ParseErr != "" {
+		if rd.Len() < len(in)-(MaxHelloBytes+MaxReplyTextBytes) {
+			t.Errorf("ReadReply consumed %d bytes, more than %d", len(in)-rd.Len(), MaxHelloBytes+MaxReplyTextBytes)
+		}
+		return
+	}
+	if ok != v.OK || code != v.Code || text != v.text() {
+		t.Errorf("ReadReply = %v %q %q, want %v %q %q", ok, code, text, v.OK, v.Code, v.text())
+	}
+	if rest := in[len(in)-rd.Len():]; rest != v.Rest {
+		t.Errorf("ReadReply left %q unread, want %q", rest, v.Rest)
+	}
+}
+
+// The vectors file has its sha256 beside it, which the coordinator hands to
+// clown so clown's copy is known to be this one. Changing the file without
+// changing the digest file (`sha256sum vectors.json > vectors.json.sha256`
+// in testdata) fails here.
+func TestVectorsMatchTheirSha256File(t *testing.T) {
+	const name = "vectors.json"
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", name+".sha256"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x  %s\n", sha256.Sum256(b), name); got != string(want) {
+		t.Errorf("%s drifted from %s.sha256: sha256 is now\n%s", name, name, got)
+	}
+}
+
+func TestEveryVectorOpIsCovered(t *testing.T) {
+	seen := map[string]bool{}
+	for _, v := range loadVectors(t) {
+		seen[v.Op] = true
+	}
+	for _, op := range []string{"hello", "reply", "format-err"} {
+		if !seen[op] {
+			t.Errorf("no vector for op %q", op)
+		}
+	}
+}
+
+func TestConstants(t *testing.T) {
+	if SocketName != "bridge.sock" || EnvDir != "CLOWN_BRIDGE_DIR" || EnvUnit != "CLOWN_BRIDGE_UNIT" {
+		t.Errorf("names: %q %q %q", SocketName, EnvDir, EnvUnit)
+	}
+	if MaxHelloBytes != 64 || MaxReplyTextBytes != 512 || MaxStreamsPerSession != 64 || MaxSocketPath != 107 {
+		t.Error("limits drifted from the contract")
+	}
+	if HelloTimeout.Seconds() != 5 {
+		t.Errorf("HelloTimeout = %v", HelloTimeout)
+	}
+	if got := strings.Join(ReservedServices, " "); got != "egress control session hook chat model keys status" {
+		t.Errorf("ReservedServices = %q", got)
+	}
+}
+
+func TestFormatHelloRoundTripsThroughParseHello(t *testing.T) {
+	b, err := FormatHello(1, "egress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "BRIDGE/1 egress\n" {
+		t.Errorf("FormatHello = %q", b)
+	}
+	h, err := ParseHello(b)
+	if err != nil || h != (Hello{Major: 1, Service: "egress"}) {
+		t.Errorf("ParseHello = %+v, %v", h, err)
+	}
+}
+
+func TestFormatHelloRefusesWhatParseHelloRefuses(t *testing.T) {
+	for _, c := range []struct {
+		major   int
+		service string
+	}{{0, "egress"}, {1000, "egress"}, {-1, "egress"}, {1, "Egress"}, {1, ""}, {1, strings.Repeat("a", 33)}} {
+		if b, err := FormatHello(c.major, c.service); !errors.Is(err, ErrMalformed) {
+			t.Errorf("FormatHello(%d, %q) = %q, %v; want ErrMalformed", c.major, c.service, b, err)
+		}
+	}
+}
+
+func TestMalformedErrorEchoIsSanitisedAndCapped(t *testing.T) {
+	line := "BRIDGE/1 \x00\x1b[31m\xff" + strings.Repeat("z", 100) + "\n"
+	_, err := ParseHello([]byte(line))
+	if !errors.Is(err, ErrMalformed) && !errors.Is(err, ErrTooLong) {
+		t.Fatalf("err = %v", err)
+	}
+	msg := err.Error()
+	for _, r := range msg {
+		if r < 0x20 || r > 0x7e {
+			t.Errorf("error text holds the raw rune %q: %q", r, msg)
+		}
+	}
+	if strings.Contains(msg, strings.Repeat("z", 40)) {
+		t.Errorf("error text echoes more than 32 bytes: %q", msg)
+	}
+	if !strings.Contains(msg, `\x00`) {
+		t.Errorf("error text does not escape the NUL byte: %q", msg)
+	}
+}
+
+func TestMalformedReplyIsTheFixedLine(t *testing.T) {
+	if got := string(MalformedReply()); got != "ERR error malformed hello\n" {
+		t.Errorf("MalformedReply = %q", got)
+	}
+	if got := string(OK()); got != "OK\n" {
+		t.Errorf("OK = %q", got)
+	}
+}
+
+func TestSocketPath(t *testing.T) {
+	got, err := SocketPath("/run/user/1000/clown/abc")
+	if err != nil || got != "/run/user/1000/clown/abc/bridge.sock" {
+		t.Errorf("SocketPath = %q, %v", got, err)
+	}
+	// A path of exactly 107 bytes is allowed.
+	dir := "/" + strings.Repeat("d", MaxSocketPath-len("/"+"/"+SocketName))
+	if p, err := SocketPath(dir); err != nil || len(p) != MaxSocketPath {
+		t.Errorf("107-byte path: %q (%d), %v", p, len(p), err)
+	}
+	_, err = SocketPath(dir + "d")
+	if err == nil {
+		t.Fatal("a 108-byte path was accepted")
+	}
+	for _, want := range []string{"108", "107", "bridge stays off"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+	if _, err := SocketPath(""); err == nil {
+		t.Error("an empty directory was accepted")
+	}
+}
+
+func TestDownMessage(t *testing.T) {
+	want := "clown: the bridge is down (connection refused); no tool or model call can leave this session; the session's frontend is gone or restarting"
+	if got := DownMessage("connection refused"); got != want {
+		t.Errorf("DownMessage = %q", got)
+	}
+}
