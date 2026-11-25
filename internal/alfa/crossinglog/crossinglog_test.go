@@ -204,8 +204,8 @@ func TestVerbServiceAndOutcomeCarryNoAttackerText(t *testing.T) {
 	if es[1]["service"] != "egress" || es[1]["outcome"] != "refused" {
 		t.Errorf("unknown-service: %v", es[1])
 	}
-	if es[2]["outcome"] != "error" {
-		t.Errorf("version: %v", es[2])
+	if es[2]["outcome"] != "version" {
+		t.Errorf("version is its own outcome: %v", es[2])
 	}
 }
 

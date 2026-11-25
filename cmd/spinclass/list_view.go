@@ -401,8 +401,9 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			mesa.Text(sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now)),
 			mesa.Text(s.Profile),
 		}
+		bridgeNote := listBridgeNote(s.Principal)
 		if !tty {
-			cells = append(cells, serveCell(serves[s.Principal], own))
+			cells = append(cells, serveBridgeCell(serves[s.Principal], own, bridgeNote))
 		}
 		desc := s.Description
 		if note := keyholderListNote(s); note != "" {
@@ -411,7 +412,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		cells = append(cells, descCell(desc, s.SpawnedBy, len(s.Holders), s.Orphan()))
 		t.Row(cells...)
 		if tty {
-			if note := serveNote(serves[s.Principal], own); note != nil {
+			if note := serveBridgeNote(serves[s.Principal], own, bridgeNote); note != nil {
 				t.Row(mesa.Text(""), *note, mesa.Text(""), mesa.Text(""), mesa.Text(""))
 			}
 		}

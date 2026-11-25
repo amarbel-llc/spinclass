@@ -170,7 +170,7 @@ func TestBridgeObserverLogsListenerOutcomes(t *testing.T) {
 		{"unknown", "hello", "hello-timeout"},
 		{"unknown", "hello", "refused"},
 		{"control", "hello", "busy"},
-		{"session", "hello", "error"},
+		{"session", "hello", "version"},
 		{"egress", "hello", "refused"},
 		{"control", "stream", "ok"},
 		{"unknown", "hello", "error"},

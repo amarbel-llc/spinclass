@@ -37,6 +37,10 @@ type healthDeps struct {
 	UnitClock func(st *session.State) (confinement.UnitClock, bool)
 	// KeyholderNote is the session's key holder line ("" for none; nil: not asked).
 	KeyholderNote func(st *session.State) string
+	// Bridge is the session's bridge state in a few words ("" when it has no
+	// bridge state file): the frontend's own report of its listener, read from
+	// the file the serve writes, never from anything the unit sends.
+	Bridge func(st *session.State) string
 }
 
 // unitExpirySoon is how little wall clock left flags a unit as expiring.
@@ -102,6 +106,7 @@ func productionHealthDeps() healthDeps {
 			j, err := job.Read(st.WorktreePath)
 			return err == nil && j.Status == job.StatusRunning
 		},
+		Bridge: func(st *session.State) string { return bridgeStateNote(stateHome, st.Principal, true) },
 	}
 }
 
@@ -191,6 +196,11 @@ func runSessionHealthWith(p sessionHealthParams, caller string, d healthDeps) (s
 		if d.KeyholderNote != nil {
 			if n := d.KeyholderNote(s); n != "" {
 				line += "; " + n
+			}
+		}
+		if d.Bridge != nil {
+			if note := d.Bridge(s); note != "" {
+				line += "; " + note
 			}
 		}
 		lines = append(lines, line)

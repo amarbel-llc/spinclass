@@ -86,7 +86,20 @@ func (h *bridgeSessionHandler) Serve(ctx context.Context, conn net.Conn, caller 
 	}
 	// A panic in the server's own goroutine ends this stream, not serve.
 	defer func() { _ = recover() }()
+	tools.emitStreamOpened()
 	_ = srv.Run(ctx)
+}
+
+// emitStreamOpened counts spinclass.bridge.session.stream.opened: one per
+// session stream that got as far as a server, so the count of streams can be
+// set against the count of calls. Off the stream's goroutine, through the
+// bounded spawner like every bridge metric.
+func (p bridgeSessionProvider) emitStreamOpened() {
+	if !p.stats.Enabled() {
+		return
+	}
+	stats := p.stats
+	sharedBridgeMetricSpawner(func() { stats.Count("bridge." + bridgeserver.ServiceSession + ".stream.opened") })
 }
 
 // bridgeSessionProvider is the registry restricted to the session tools.

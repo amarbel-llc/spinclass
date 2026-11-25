@@ -52,6 +52,10 @@ const (
 	OutcomeError        = "error"
 	OutcomeBusy         = "busy"
 	OutcomeHelloTimeout = "hello-timeout"
+	// OutcomeVersion is a hello whose major version the listener does not
+	// speak (ERR version). It is its own outcome, not an error: it is the one
+	// that means "this shim and this frontend were built apart".
+	OutcomeVersion = "version"
 )
 
 // SafeFields is the per-verb allow-list of argument names whose values may be
@@ -375,15 +379,21 @@ func verbLabel(v string) string {
 }
 
 // NormalizeOutcome maps a listener outcome onto the closed set of outcomes
-// (ok, refused, error, busy, hello-timeout).
+// (ok, refused, error, busy, hello-timeout, version).
 func NormalizeOutcome(o string) string {
 	switch o {
-	case OutcomeOK, OutcomeRefused, OutcomeBusy, OutcomeHelloTimeout:
+	case OutcomeOK, OutcomeRefused, OutcomeBusy, OutcomeHelloTimeout, OutcomeVersion:
 		return o
 	case bridge.CodeUnknownService:
 		return OutcomeRefused
 	}
 	return OutcomeError
+}
+
+// StatePath is where the bridge state file of a principal lives, beside its
+// crossing log in dir (the <state>/spinclass/bridge directory).
+func StatePath(dir, principal string) string {
+	return filepath.Join(dir, fileSegment(principal)+".state.json")
 }
 
 // fileSegment makes a principal one safe file-name segment.

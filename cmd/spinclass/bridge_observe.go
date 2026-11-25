@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"sync"
+
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
@@ -20,7 +23,19 @@ type bridgeObserver struct {
 	// spawn runs a metric emission off the crossing's goroutine; nil is the
 	// shared bounded spawner.
 	spawn func(func())
+	// signal reports a condition a holder should hear about (kind is "version"
+	// or "peer-refused"); nil reports nothing. Serve sets it to the wake.
+	signal func(session, kind, msg string)
+
+	mu          sync.Mutex
+	refusedRun  int
+	versionSeen bool
 }
+
+// bridgePeerRefusalWake is how many peer refusals in a row (no served stream
+// between them) are worth a wake: one is a stray process, five is a bridge
+// nobody can use.
+const bridgePeerRefusalWake = 5
 
 var sharedBridgeMetricSpawner = newBoundedSpawner(bridgeMetricSlots)
 
@@ -48,6 +63,45 @@ func newBoundedSpawner(n int) func(func()) {
 func (o *bridgeObserver) Crossing(e bridgeserver.Event) {
 	o.logCrossing(e)
 	o.emitMetrics(e)
+	o.watch(e)
+}
+
+// watch turns two patterns into one signal each: the first ERR version (the
+// shim and this frontend were built apart, and every connection will say the
+// same) and bridgePeerRefusalWake peer refusals in a row (the bridge is up and
+// nobody it admits can reach it). A peer refusal is a refused outcome with no
+// service: a hello that named an unknown service has one. A served stream ends
+// the run.
+func (o *bridgeObserver) watch(e bridgeserver.Event) {
+	if o.signal == nil {
+		return
+	}
+	var kind, msg string
+	o.mu.Lock()
+	switch {
+	case e.Outcome == crossinglog.OutcomeVersion && !o.versionSeen:
+		o.versionSeen = true
+		kind = "version"
+		msg = fmt.Sprintf("a shim of %s said hello with a bridge version this frontend does not speak (ERR version): its bridge is down until the shim and this frontend come from builds that agree", e.Caller.SessionKey)
+	case e.Outcome == crossinglog.OutcomeRefused && e.Service == "":
+		o.refusedRun++
+		if o.refusedRun >= bridgePeerRefusalWake {
+			o.refusedRun = 0
+			kind = "peer-refused"
+			msg = fmt.Sprintf("%d connections in a row to the bridge of %s were refused: they did not come from its unit, or its cgroup file is not valid, so the bridge is not usable until that is fixed", bridgePeerRefusalWake, e.Caller.SessionKey)
+		}
+	case e.Outcome == crossinglog.OutcomeOK:
+		o.refusedRun = 0
+	}
+	o.mu.Unlock()
+	if kind != "" {
+		o.signal(e.Caller.SessionKey, kind, msg)
+	}
+}
+
+// bridgeWakeSignal is the signal serve wires into its observer.
+func bridgeWakeSignal(session, kind, msg string) {
+	bridgeWake(session, kind, kind, msg)
 }
 
 func (o *bridgeObserver) logCrossing(e bridgeserver.Event) {

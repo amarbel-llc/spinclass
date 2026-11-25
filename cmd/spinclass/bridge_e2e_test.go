@@ -571,8 +571,8 @@ func TestE2EVersionMismatchBytesEqualTheVectors(t *testing.T) {
 	}
 	es := b.crossings(len(vectors))
 	for _, e := range es {
-		if e["outcome"] != "error" || e["verb"] != "hello" {
-			t.Errorf("crossing line = %v, want hello/error", e)
+		if e["outcome"] != "version" || e["verb"] != "hello" {
+			t.Errorf("crossing line = %v, want hello/version", e)
 		}
 	}
 	// And the vector's own malformed-hello reply is what a malformed hello gets.

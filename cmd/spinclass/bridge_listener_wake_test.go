@@ -59,9 +59,10 @@ func (l *logCapture) add(f string, a ...any) {
 func stubBridgeLog(t *testing.T) *logCapture {
 	t.Helper()
 	c := &logCapture{}
-	orig := bridgeLogf
+	orig, origWakes := bridgeLogf, bridgeWakes
 	bridgeLogf = c.add
-	t.Cleanup(func() { bridgeLogf = orig })
+	bridgeWakes = newWakeLimiter() // each test is its own session's first failure
+	t.Cleanup(func() { bridgeLogf, bridgeWakes = orig, origWakes })
 	return c
 }
 
