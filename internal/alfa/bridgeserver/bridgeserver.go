@@ -25,8 +25,6 @@ import (
 	"syscall"
 	"time"
 
-	"code.linenisgreat.com/clown/pkgs/peercheck"
-
 	"code.linenisgreat.com/spinclass/internal/0/bridge"
 	"code.linenisgreat.com/spinclass/internal/0/policybroker"
 )
@@ -44,6 +42,11 @@ const (
 	// RefusedPeerText is the text of the refusal sent to a peer that is not in
 	// the session's unit.
 	RefusedPeerText = "refused: this connection does not come from this session's unit; the bridge answers only the unit it was created for"
+
+	// NotReadyText is the text of the refusal while the unit's cgroup file is
+	// missing or invalid: the bridge admits nobody until it reads a valid one.
+	// The code is the same ERR refused, which the shim retries.
+	NotReadyText = "refused: the bridge does not know this unit's cgroup yet; try again shortly"
 
 	writeTimeout      = 2 * time.Second
 	staleProbeTimeout = time.Second
@@ -70,14 +73,16 @@ var (
 	afterBind = func(path string) {}
 	// peerUID is the same-uid check of a peer; it returns the peer's pid.
 	peerUID = policybroker.SameUID
-	// peerUnitCgroup is the check that pid runs in unit's cgroup.
-	peerUnitCgroup = func(pid int, unit string) error { return peercheck.CheckUnitCgroup(pid, unit, nil) }
 )
 
 var (
 	// ErrOff marks a bridge that stays off for a reason that is not a refusal
 	// of its configuration (the socket path is over the unix limit).
 	ErrOff = errors.New("bridge off")
+	// ErrNoPeerCheck is Listen's refusal when no exact peer check was supplied:
+	// the bridge admits a peer only by the exact cgroup of its unit, and a
+	// weaker default would admit its neighbours.
+	ErrNoPeerCheck = errors.New("the bridge needs peercheck.CheckPeerExact from a merged clown; none is wired in this build")
 	// ErrNoControl is Push's error when no control stream is open.
 	ErrNoControl = errors.New("bridge: no control stream is open")
 )
@@ -130,8 +135,19 @@ type Options struct {
 	Handler SessionHandler
 	// Served is the set of labels answered; nil serves control and session.
 	Served func() map[string]bool
-	// PeerCheck decides whether a peer may speak; nil is the same-uid and
-	// unit-cgroup check. An error refuses (fail closed).
+	// CheckPeer is the exact peer check (clown's peercheck.CheckPeerExact):
+	// it admits conn only when its process runs in exactly wantCgroup, the
+	// cgroup the unit's cgroup file names. There is no default: a listener
+	// given neither CheckPeer nor PeerCheck refuses to start (ErrNoPeerCheck).
+	CheckPeer func(conn net.Conn, wantCgroup string) error
+	// CgroupFile is the file clown writes the unit's cgroup path into
+	// (CLOWN_BRIDGE_CGROUP_FILE). It is read on every connection; while it is
+	// missing or invalid every peer is answered ERR refused. It must lie
+	// outside the bridge directory.
+	CgroupFile string
+	// PeerCheck replaces the whole peer decision (the cgroup file, CheckPeer
+	// and the uid check). It exists for tests that need a connection decided
+	// without a unit; production code leaves it nil.
 	PeerCheck func(conn net.Conn, unit string) error
 	// Observer receives one Event per connection; nil is a no-op.
 	Observer Observer
@@ -180,7 +196,7 @@ type Server struct {
 	wg          sync.WaitGroup
 	closeOnce   sync.Once
 	closeErr    error
-	lock        *os.File
+	cgroupSeen  atomic.Bool
 	deadMu      sync.Mutex
 	dead        error
 	ctlMu       sync.Mutex
@@ -202,26 +218,32 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrOff, err)
 	}
+	if opts.PeerCheck == nil {
+		if opts.CheckPeer == nil {
+			return nil, ErrNoPeerCheck
+		}
+		if err := checkCgroupFilePath(dir, opts.CgroupFile); err != nil {
+			return nil, err
+		}
+	}
 	if err := checkDir(dir); err != nil {
 		return nil, err
 	}
-	// The lock is held for the life of the server: clear-and-bind is then one
-	// step against any other listener of this directory, and a second frontend
-	// cannot take the path over while this one serves.
+	// The lock is held around clear-and-bind, so two listeners of one directory
+	// cannot both find the path stale and both bind; whoever binds second sees
+	// the first's live socket and is refused. It is not held while serving: a
+	// successor may take a path whose socket was removed.
 	lock, err := lockDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	l, id, err := bindSocket(path)
+	_ = lock.Close()
 	if err != nil {
-		_ = lock.Close()
 		return nil, err
 	}
 	if opts.Observer == nil {
 		opts.Observer = noopObserver{}
-	}
-	if opts.PeerCheck == nil {
-		opts.PeerCheck = defaultPeerCheck
 	}
 	if opts.Logf == nil {
 		opts.Logf = func(string, ...any) {}
@@ -238,7 +260,7 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{l: l, path: path, id: id, unit: unit, opts: opts, lock: lock, ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}}, nil
+	return &Server{l: l, path: path, id: id, unit: unit, opts: opts, ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}}, nil
 }
 
 const (
@@ -369,19 +391,29 @@ type closeHandler struct{}
 
 func (closeHandler) Serve(context.Context, net.Conn, Caller) {}
 
-// defaultPeerCheck admits a peer of this uid that runs in the unit's cgroup.
-// Same uid is not enough: the unit is what the bridge was created for.
-func defaultPeerCheck(c net.Conn, unit string) error {
-	pid, err := peerUID(c)
+// checkPeer decides one connection. text is the refusal's text when err is
+// set. Not being in the unit and not being able to tell are the same answer
+// (ERR refused); the text differs only for a cgroup file that is not (yet)
+// there, so the shim can tell "retry" from "never".
+func (s *Server) checkPeer(conn net.Conn) (text string, err error) {
+	if s.opts.PeerCheck != nil {
+		if err := s.opts.PeerCheck(conn, s.unit); err != nil {
+			return RefusedPeerText, err
+		}
+		return "", nil
+	}
+	if _, err := peerUID(conn); err != nil {
+		return RefusedPeerText, err
+	}
+	cg, err := ReadCgroupFile(s.opts.CgroupFile)
 	if err != nil {
-		return err
+		return NotReadyText, err
 	}
-	// Any error refuses: not being in the unit and not being able to tell are
-	// the same answer.
-	if err := peerUnitCgroup(pid, unit); err != nil {
-		return err
+	s.cgroupSeen.Store(true)
+	if err := s.opts.CheckPeer(conn, cg); err != nil {
+		return RefusedPeerText, err
 	}
-	return nil
+	return "", nil
 }
 
 func checkUnit(unit string) error {
@@ -548,6 +580,10 @@ func (s *Server) watchSocket() {
 				s.declareDead(err)
 				return
 			}
+			if err := s.cgroupFileGone(); err != nil {
+				s.declareDead(err)
+				return
+			}
 		}
 	}
 }
@@ -571,9 +607,6 @@ func (s *Server) Close() error {
 		s.wg.Wait()
 		if err := s.removeOwnSocket(); err != nil && s.closeErr == nil {
 			s.closeErr = err
-		}
-		if s.lock != nil {
-			_ = s.lock.Close()
 		}
 	})
 	return s.closeErr
@@ -626,10 +659,10 @@ func (s *Server) refuse(conn net.Conn, errLine []byte) {
 
 func (s *Server) handle(conn net.Conn) {
 	started := time.Now()
-	if err := s.opts.PeerCheck(conn, s.unit); err != nil {
+	if text, err := s.checkPeer(conn); err != nil {
 		s.refused.Add(1)
 		s.opts.Logf("bridge refused a peer outside unit %s: %v", s.unit, err)
-		s.refuse(conn, bridge.FormatErr(bridge.CodeRefused, RefusedPeerText))
+		s.refuse(conn, bridge.FormatErr(bridge.CodeRefused, text))
 		s.observe("", bridge.CodeRefused, started)
 		return
 	}

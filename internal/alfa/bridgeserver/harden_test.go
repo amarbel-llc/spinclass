@@ -200,31 +200,19 @@ func TestCloseStillRemovesItsOwnSocket(t *testing.T) {
 	}
 }
 
-func TestDefaultPeerCheckRefusesOnAnyError(t *testing.T) {
-	origUID, origCg := peerUID, peerUnitCgroup
-	t.Cleanup(func() { peerUID, peerUnitCgroup = origUID, origCg })
-	c1, c2 := net.Pipe()
-	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
-
-	peerUID = func(net.Conn) (int, error) { return 42, nil }
-	peerUnitCgroup = func(int, string) error { return nil }
-	if err := defaultPeerCheck(c1, testUnit); err != nil {
-		t.Fatalf("a peer in the unit is refused: %v", err)
-	}
-	for name, cgErr := range map[string]error{
-		"not in unit": errors.New("pid 42 is not in unit"),
-		"read error":  &fs.PathError{Op: "open", Path: "/proc/42/cgroup", Err: fs.ErrNotExist},
-		"permission":  &fs.PathError{Op: "open", Path: "/proc/42/cgroup", Err: fs.ErrPermission},
-	} {
-		peerUnitCgroup = func(int, string) error { return cgErr }
-		if err := defaultPeerCheck(c1, testUnit); err == nil {
-			t.Errorf("%s: a cgroup check error did not refuse", name)
-		}
-	}
+func TestAnUnreadablePeerUIDRefusesBeforeTheExactCheck(t *testing.T) {
+	orig := peerUID
+	t.Cleanup(func() { peerUID = orig })
 	peerUID = func(net.Conn) (int, error) { return 0, errors.New("no creds") }
-	peerUnitCgroup = func(int, string) error { return nil }
-	if err := defaultPeerCheck(c1, testUnit); err == nil {
-		t.Error("an unreadable peer uid did not refuse")
+	fake := &fakeExact{}
+	dir, _, _ := startExact(t, writeCgroupFile(t, testCgroup), fake.check)
+	c := dial(t, dir)
+	send(t, c, "BRIDGE/1 control\n")
+	if got := readAll(t, c); !strings.HasPrefix(got, "ERR refused ") {
+		t.Errorf("reply %q, want ERR refused", got)
+	}
+	if n := len(fake.calls()); n != 0 {
+		t.Errorf("the exact checker ran %d times for a peer whose uid is unknown", n)
 	}
 }
 

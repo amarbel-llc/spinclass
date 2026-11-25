@@ -64,8 +64,8 @@ func TestConcurrentListenOnOneDirExactlyOneWins(t *testing.T) {
 	if err := winners[0].Close(); err != nil {
 		t.Fatal(err)
 	}
-	// The lock dies with the server: a successor gets it, and the stale lock
-	// file left in the directory is harmless.
+	// The lock is only held around the bind, and the lock file left in the
+	// directory is harmless: a successor listens.
 	s, err := Listen(dir, testUnit, Options{PeerCheck: allowAll})
 	if err != nil {
 		t.Fatalf("Listen after Close: %v", err)

@@ -26,6 +26,80 @@ func bridgeTestEnv(dir, unit string) func(string) string {
 	return func(k string) string { return env[k] }
 }
 
+// wireTestPeerCheck wires check (nil admits) as the build's exact peer check
+// for the test and returns a valid 0600 cgroup file for the plan, outside any
+// bridge directory.
+func wireTestPeerCheck(t *testing.T, check func(net.Conn, string) error) string {
+	t.Helper()
+	if check == nil {
+		check = func(net.Conn, string) error { return nil }
+	}
+	old := bridgeCheckPeer
+	bridgeCheckPeer = check
+	t.Cleanup(func() { bridgeCheckPeer = old })
+	p := filepath.Join(t.TempDir(), "bridge.cgroup")
+	if err := os.WriteFile(p, []byte("/clown-agent.slice/"+e2eUnit), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// withCgroupFile adds the cgroup file to an environment.
+func withCgroupFile(base func(string) string, file string) func(string) string {
+	return func(k string) string {
+		if k == bridge.EnvCgroupFile {
+			return file
+		}
+		return base(k)
+	}
+}
+
+// Production wiring: with the env and the trusted [bridge] enable both set, a
+// build that has no exact peer check wired stays off, with the named reason,
+// and leaves nothing in the bridge directory. When a clown that has
+// CheckPeerExact is wired this test is replaced by one that it listens.
+func TestProductionWiringStaysOffUntilAnExactPeerCheckIsWired(t *testing.T) {
+	if bridgeCheckPeer != nil {
+		t.Fatal("this build wires an exact peer check: replace this test with the one that pins that wiring")
+	}
+	home := t.TempDir()
+	repo := filepath.Join(home, "work", "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeBridgeSweatfile(t, filepath.Join(home, ".config", "spinclass", "sweatfile"), "[bridge]\nenable = true\n")
+	dir := shortBridgeDir(t)
+	cg := filepath.Join(t.TempDir(), "bridge.cgroup")
+	if err := os.WriteFile(cg, []byte("/clown-agent.slice/"+e2eUnit), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	getenv := withCgroupFile(bridgeTestEnv(dir, e2eUnit), cg)
+	if p := resolveBridgePlan(getenv, home, repo); p.Dir != dir || p.CgroupFile != cg {
+		t.Fatalf("env and enable must make a plan: %+v", p)
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("HOME", home)
+	t.Setenv("CLOWN_SESSION_ID", e2ePrincipal)
+	t.Setenv("SPINCLASS_SESSION_ID", sessionTestKey)
+	stageSessionKey(t, sessionTestKey, e2ePrincipal)
+	failures := stubBridgeFailureHook(t)
+	old := bridgeResolve
+	bridgeResolve = func() bridgePlan { return resolveBridgePlan(getenv, home, repo) }
+	t.Cleanup(func() { bridgeResolve = old })
+
+	stop := startBridge(context.Background(), e2eHandlerFactory())
+	if stop != nil {
+		stop()
+		t.Fatal("the bridge listens with no exact peer check wired")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("the bridge directory is not empty: %v", entries)
+	}
+	if len(*failures) != 1 || !strings.Contains((*failures)[0], "peercheck.CheckPeerExact") {
+		t.Errorf("failures = %v, want one naming peercheck.CheckPeerExact", *failures)
+	}
+}
+
 func writeBridgeSweatfile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -140,8 +214,9 @@ func TestStartBridgeStaysOffUnlessThePrincipalResolvesToTheListenersKey(t *testi
 			}
 			failures := stubBridgeFailureHook(t)
 			dir := shortBridgeDir(t)
+			cg := wireTestPeerCheck(t, nil)
 			old := bridgeResolve
-			bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit} }
+			bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit, CgroupFile: cg} }
 			t.Cleanup(func() { bridgeResolve = old })
 
 			stop := startBridge(context.Background(), e2eHandlerFactory())

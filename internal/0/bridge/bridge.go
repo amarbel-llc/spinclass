@@ -22,9 +22,11 @@ import (
 const (
 	// SocketName is the socket file inside the bridge directory.
 	SocketName = "bridge.sock"
-	// EnvDir and EnvUnit are the environment variables clown sets for the shim.
-	EnvDir  = "CLOWN_BRIDGE_DIR"
-	EnvUnit = "CLOWN_BRIDGE_UNIT"
+	// EnvDir, EnvUnit and EnvCgroupFile are the environment variables clown
+	// sets on the serve process; each is the empty string when the bridge is off.
+	EnvDir        = "CLOWN_BRIDGE_DIR"
+	EnvUnit       = "CLOWN_BRIDGE_UNIT"
+	EnvCgroupFile = "CLOWN_BRIDGE_CGROUP_FILE"
 
 	// MaxHelloBytes bounds the hello line, newline included.
 	MaxHelloBytes = 64

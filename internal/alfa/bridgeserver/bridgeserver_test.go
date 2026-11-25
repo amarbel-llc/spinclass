@@ -442,24 +442,6 @@ func TestPeerOutsideTheUnitIsRefusedAndCounted(t *testing.T) {
 	}
 }
 
-// The default check reads the peer's real cgroup; this test process is in no
-// unit named like this, so it must be refused (and a failure to read /proc is
-// a refusal too: it fails closed).
-func TestDefaultPeerCheckRefusesAPeerOutsideTheUnit(t *testing.T) {
-	dir := shortDir(t)
-	s, err := Listen(dir, "bridge-no-such-unit.service", Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() { _ = s.Serve(context.Background()) }()
-	t.Cleanup(func() { _ = s.Close() })
-	c := dial(t, dir)
-	send(t, c, "BRIDGE/1 control\n")
-	if got := readAll(t, c); !strings.HasPrefix(got, "ERR refused ") {
-		t.Errorf("reply %q, want ERR refused", got)
-	}
-}
-
 type recordingObserver struct {
 	mu     sync.Mutex
 	events []Event

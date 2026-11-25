@@ -472,17 +472,22 @@ func TestE2EWrongUnitPeerIsRefusedAndNothingIsServed(t *testing.T) {
 	}
 }
 
-// 3b. The listener's own check (no injection): this test process is not in the
-// unit named agent.service, so serve's real wiring refuses it.
-func TestE2ERealPeerCheckRefusesAProcessOutsideTheUnit(t *testing.T) {
+// 3b. Serve's own wiring (startBridge, the cgroup file, the exact-check seam):
+// a checker that finds the peer outside the unit's exact cgroup refuses it.
+func TestE2EExactPeerCheckRefusesAProcessOutsideTheUnit(t *testing.T) {
 	dir := shortBridgeDir(t)
+	var sawWant string
+	cg := wireTestPeerCheck(t, func(_ net.Conn, want string) error {
+		sawWant = want
+		return errors.New("peer is not in exactly " + want)
+	})
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", e2ePrincipal)
 	t.Setenv("SPINCLASS_SESSION_ID", sessionTestKey)
 	stageSessionKey(t, sessionTestKey, e2ePrincipal)
 	old := bridgeResolve
-	bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit} }
+	bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit, CgroupFile: cg} }
 	t.Cleanup(func() { bridgeResolve = old })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -495,6 +500,9 @@ func TestE2ERealPeerCheckRefusesAProcessOutsideTheUnit(t *testing.T) {
 	want := string(bridge.FormatErr(bridge.CodeRefused, bridgeserver.RefusedPeerText))
 	if got != want {
 		t.Errorf("reply %q, want %q", got, want)
+	}
+	if sawWant != "/clown-agent.slice/"+e2eUnit {
+		t.Errorf("the checker was asked about %q, want the cgroup file's content", sawWant)
 	}
 }
 
@@ -838,9 +846,10 @@ func TestE2ESwitchOffMeansNoSocket(t *testing.T) {
 				writeBridgeSweatfile(t, filepath.Join(repo, "sweatfile"), c.repo)
 			}
 			dir := shortBridgeDir(t)
+			cg := wireTestPeerCheck(t, nil)
 			getenv := bridgeTestEnv("", "")
 			if c.env {
-				getenv = bridgeTestEnv(dir, e2eUnit)
+				getenv = withCgroupFile(bridgeTestEnv(dir, e2eUnit), cg)
 			}
 			t.Setenv("XDG_STATE_HOME", t.TempDir())
 			t.Setenv("HOME", home)

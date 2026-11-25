@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -19,10 +20,17 @@ import (
 // bridge frontend. A plan with an empty Dir means no bridge, and Reason says
 // why.
 type bridgePlan struct {
-	Dir    string
-	Unit   string
-	Reason string
+	Dir        string
+	Unit       string
+	CgroupFile string
+	Reason     string
 }
+
+// bridgeCheckPeer is the exact peer check this build wires into the listener:
+// clown's peercheck.CheckPeerExact(conn, wantCgroup). It is nil until a clown
+// that has it is merged and pinned; a nil check keeps the bridge off with a
+// named reason (bridgeserver.ErrNoPeerCheck), never a weaker default.
+var bridgeCheckPeer func(conn net.Conn, wantCgroup string) error
 
 // resolveBridgePlan turns the environment clown exported and the trusted
 // [bridge] switch into a plan. Both must hold: the env names where and for
@@ -44,7 +52,7 @@ func resolveBridgePlan(getenv func(string) string, home, repoRoot string) bridge
 	if !enable {
 		return bridgePlan{Reason: "no trusted [bridge] enable = true"}
 	}
-	return bridgePlan{Dir: dir, Unit: unit}
+	return bridgePlan{Dir: dir, Unit: unit, CgroupFile: bridgeserver.EnvCgroupFile(getenv)}
 }
 
 // bridgeResolve is the seam tests replace for the working-directory and home
@@ -79,6 +87,13 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 		servelog.Errorf("serve.bridge off: session key unresolved: %v", err)
 		return nil
 	}
+	// No exact peer check wired: the listener stays off, loudly. A weaker check
+	// would admit the unit's neighbours, so there is no fallback.
+	if bridgeCheckPeer == nil {
+		servelog.Errorf("serve.bridge off: %v", bridgeserver.ErrNoPeerCheck)
+		bridgeListenerFailed(key, bridgeserver.ErrNoPeerCheck)
+		return nil
+	}
 	// Every bridged call acts on the session this listener carries, so the key
 	// must be the one the frontend's own principal-to-session resolution gives
 	// this serve's principal. The principal resolves to nothing (the
@@ -100,6 +115,8 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 	stats := permissionStatsdClient(sf, loaded)
 	return startBridgeFrom(ctx, plan, bridgeserver.Options{
 		SessionKey: key,
+		CheckPeer:  bridgeCheckPeer,
+		CgroupFile: plan.CgroupFile,
 		Handler:    newHandler(log, stats),
 		Observer:   &bridgeObserver{log: log, stats: stats},
 		Logf:       servelog.Errorf,
