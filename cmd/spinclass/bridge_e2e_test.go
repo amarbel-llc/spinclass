@@ -54,12 +54,12 @@ const (
 
 // e2eHandlerFactory is the handler constructor serve passes to startBridge
 // (commands_mcp.go), over a registry built the way serve builds it.
-func e2eHandlerFactory() func(rec crossingRecorder) bridgeserver.SessionHandler {
+func e2eHandlerFactory() func(rec crossingRecorder, stats statsd.Client) bridgeserver.SessionHandler {
 	app := buildApp()
 	registry := server.NewToolRegistryV1()
 	app.RegisterMCPToolsV1(registry)
-	return func(rec crossingRecorder) bridgeserver.SessionHandler {
-		return newBridgeSessionHandler(registry, app.Name, app.Version, rec)
+	return func(rec crossingRecorder, stats statsd.Client) bridgeserver.SessionHandler {
+		return newBridgeSessionHandler(registry, app.Name, app.Version, rec, stats)
 	}
 }
 
@@ -95,6 +95,7 @@ func startE2E(t *testing.T, o e2eOpts) *e2eBridge {
 	b.logPath = filepath.Join(b.state, "spinclass", "bridge", e2ePrincipal+".ndjson")
 
 	clog := openBridgeCrossingLog()
+	stats := statsd.Resolve("", false)
 	peer := o.peer
 	if peer == nil {
 		peer = func(net.Conn, string) error { return nil }
@@ -103,8 +104,8 @@ func startE2E(t *testing.T, o e2eOpts) *e2eBridge {
 	b.cancel = cancel
 	b.stop = startBridgeFrom(ctx, bridgePlan{Dir: b.dir, Unit: e2eUnit}, bridgeserver.Options{
 		SessionKey:   sessionTestKey,
-		Handler:      e2eHandlerFactory()(clog),
-		Observer:     &bridgeObserver{log: clog, stats: statsd.Resolve("", false)},
+		Handler:      e2eHandlerFactory()(clog, stats),
+		Observer:     &bridgeObserver{log: clog, stats: stats},
 		PeerCheck:    peer,
 		HelloTimeout: o.helloTimeout,
 		Logf: func(format string, args ...any) {

@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/transport"
 
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
@@ -57,8 +58,8 @@ type crossingRecorder interface {
 
 // newBridgeSessionHandler serves the seven session tools out of registry and
 // records each tools/call in rec.
-func newBridgeSessionHandler(registry *server.ToolRegistryV1, name, version string, rec crossingRecorder) bridgeserver.SessionHandler {
-	return &bridgeSessionHandler{tools: bridgeSessionProvider{registry: registry, rec: rec}, name: name, version: version}
+func newBridgeSessionHandler(registry *server.ToolRegistryV1, name, version string, rec crossingRecorder, stats statsd.Client) bridgeserver.SessionHandler {
+	return &bridgeSessionHandler{tools: bridgeSessionProvider{registry: registry, rec: rec, stats: stats}, name: name, version: version}
 }
 
 // Serve runs one MCP server over conn until the peer ends the stream or ctx
@@ -89,6 +90,7 @@ func (h *bridgeSessionHandler) Serve(ctx context.Context, conn net.Conn, caller 
 type bridgeSessionProvider struct {
 	registry *server.ToolRegistryV1
 	rec      crossingRecorder
+	stats    statsd.Client
 	session  string
 }
 
@@ -194,9 +196,6 @@ func (p bridgeSessionProvider) callToolV1(ctx context.Context, name string, args
 // itself; nothing here is written that the log would not. A nil recorder
 // records nothing, and the recorder never fails the call.
 func (p bridgeSessionProvider) record(name string, args json.RawMessage, started time.Time, res any, isErr bool, err error) {
-	if p.rec == nil {
-		return
-	}
 	verb := "unknown"
 	if p.allowed(name) {
 		verb = name
@@ -213,6 +212,11 @@ func (p bridgeSessionProvider) record(name string, args json.RawMessage, started
 	case isErr:
 		outcome = crossinglog.OutcomeError
 	}
+	duration := time.Since(started)
+	p.emitToolMetrics(verb, outcome, duration)
+	if p.rec == nil {
+		return
+	}
 	if err == nil && res != nil {
 		if b, merr := json.Marshal(res); merr == nil {
 			resp = len(b)
@@ -223,10 +227,28 @@ func (p bridgeSessionProvider) record(name string, args json.RawMessage, started
 		Service:   bridgeserver.ServiceSession,
 		Verb:      verb,
 		Outcome:   outcome,
-		Duration:  time.Since(started),
+		Duration:  duration,
 		ReqBytes:  len(args),
 		RespBytes: resp,
 		Args:      args,
+	})
+}
+
+// emitToolMetrics counts spinclass.bridge.session.tool.<tool>.<outcome> and
+// times spinclass.bridge.session.tool.<tool>.duration_ms, off the call's
+// goroutine through the bounded spawner (a burst against an unreachable
+// endpoint drops metrics, never queues or waits). verb is one of the seven
+// names or "unknown" and outcome one of ok, refused, error, so the name holds
+// nothing from the request.
+func (p bridgeSessionProvider) emitToolMetrics(verb, outcome string, d time.Duration) {
+	if !p.stats.Enabled() {
+		return
+	}
+	prefix := "bridge." + bridgeserver.ServiceSession + ".tool." + statsd.Segment(strings.ReplaceAll(verb, "-", "_")) + "."
+	stats := p.stats
+	sharedBridgeMetricSpawner(func() {
+		stats.Count(prefix + outcome)
+		stats.Timing(prefix+"duration_ms", d)
 	})
 }
 

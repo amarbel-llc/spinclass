@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -67,7 +68,7 @@ var bridgeResolve = func() bridgePlan {
 // startBridge starts the bridge listener when the plan allows it and returns
 // what stops it; nil when serve runs without it, with the reason in the serve
 // log. sessionHandler serves the session service. It never fails serve.
-func startBridge(ctx context.Context, newHandler func(rec crossingRecorder) bridgeserver.SessionHandler) (stop func()) {
+func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stats statsd.Client) bridgeserver.SessionHandler) (stop func()) {
 	plan := bridgeResolve()
 	if plan.Dir == "" {
 		servelog.Infof("serve.bridge off: %s", plan.Reason)
@@ -82,10 +83,11 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder) brid
 	// The statsd endpoint resolves once, from the sweatfile's [metrics] and
 	// the environment, as the permission counters do.
 	sf, loaded := mergedSweatfileForCwd()
+	stats := permissionStatsdClient(sf, loaded)
 	return startBridgeFrom(ctx, plan, bridgeserver.Options{
 		SessionKey: key,
-		Handler:    newHandler(log),
-		Observer:   &bridgeObserver{log: log, stats: permissionStatsdClient(sf, loaded)},
+		Handler:    newHandler(log, stats),
+		Observer:   &bridgeObserver{log: log, stats: stats},
 		Logf:       servelog.Errorf,
 	})
 }

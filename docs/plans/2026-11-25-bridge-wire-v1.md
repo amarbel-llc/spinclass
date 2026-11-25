@@ -139,6 +139,16 @@ matching `[A-Za-z0-9._/-]+`, otherwise dropped. Nothing from free text
 (descriptions, messages, commands, reasons) is ever logged, and no attacker
 text reaches `service` or `verb`.
 
+Metrics: besides the per-stream counter and timer
+(`spinclass.bridge.<service>.<outcome>`, `.duration_ms`), each `tools/call` on
+the `session` service is counted and timed as
+`spinclass.bridge.session.tool.<tool>.<outcome>` and
+`spinclass.bridge.session.tool.<tool>.duration_ms`. `<tool>` is one of the seven
+tool names with `-` as `_`, or `unknown` for any other name (no text from the
+request reaches a metric name); `<outcome>` is `ok`, `refused` (JSON-RPC error
+-32001) or `error`, as in the log. Emission is best effort and bounded: a burst
+that finds every slot taken drops the metric.
+
 Retention: when a write would take the file past 4 MiB it is renamed to
 `<principal>.ndjson.1` (older generations shift up; at most three are kept, `.1`
 to `.3`), and log files older than 14 days are deleted when the log opens. A

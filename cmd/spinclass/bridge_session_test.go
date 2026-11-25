@@ -16,6 +16,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 
 	"code.linenisgreat.com/spinclass/internal/0/bridge"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 )
 
@@ -41,7 +42,7 @@ func startSessionBridgeWith(t *testing.T, rec crossingRecorder, obs bridgeserver
 	dir := shortBridgeDir(t)
 	srv, err := bridgeserver.Listen(dir, "agent.service", bridgeserver.Options{
 		SessionKey: sessionTestKey,
-		Handler:    newBridgeSessionHandler(reg, "spinclass", "test", rec),
+		Handler:    newBridgeSessionHandler(reg, "spinclass", "test", rec, statsd.Client{}),
 		Observer:   obs,
 		PeerCheck:  func(net.Conn, string) error { return nil },
 	})
