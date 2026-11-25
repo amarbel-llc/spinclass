@@ -604,7 +604,7 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 
 	merged := hierarchy.Merged
 	entry := startEntry(resolvedPath, merged, os.Stderr)
-	kh, undoKeyholder, err := keyholderSessionEnvUndo(os.Getenv("HOME"), repoPath, resolvedPath.SessionKey, os.Stderr)
+	kh, undoKeyholder, err := keyholderLaunchEnvUndo(os.Getenv("HOME"), repoPath, resolvedPath.SessionKey, false, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -864,7 +864,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	}
 
 	env := withEnvPairs(withEnvPairs(entry.Env, dotenv), profileEnv)
-	kh, err := keyholderSessionEnv(os.Getenv("HOME"), state.RepoPath, state.SessionKey, os.Stderr)
+	kh, _, err := keyholderLaunchEnvUndo(os.Getenv("HOME"), state.RepoPath, state.SessionKey, resumeIsSpawned(state), os.Stderr)
 	if err != nil {
 		return err
 	}
