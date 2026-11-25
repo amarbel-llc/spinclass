@@ -164,13 +164,13 @@ func TestPeerIsRefusedWhileTheCgroupFileIsMissingOrInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]string{
-		"missing":          filepath.Join(shortDir(t), "never-written"),
-		"empty":            writeCgroupFile(t, ""),
-		"two newlines":     writeCgroupFile(t, testCgroup+"\n\n"),
-		"relative":         writeCgroupFile(t, "not/absolute"),
-		"mode 0644":        loose,
-		"symlink":          link,
-		"a directory":      shortDir(t),
+		"missing":      filepath.Join(shortDir(t), "never-written"),
+		"empty":        writeCgroupFile(t, ""),
+		"two newlines": writeCgroupFile(t, testCgroup+"\n\n"),
+		"relative":     writeCgroupFile(t, "not/absolute"),
+		"mode 0644":    loose,
+		"symlink":      link,
+		"a directory":  shortDir(t),
 	}
 	want := string(bridge.FormatErr(bridge.CodeRefused, NotReadyText))
 	for name, file := range cases {
