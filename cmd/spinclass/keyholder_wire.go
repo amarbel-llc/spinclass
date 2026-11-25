@@ -108,7 +108,9 @@ func keyholderSessionEnvUndo(home, repoPath, sessionKey string, stderr io.Writer
 		// here, so a lost pair is announced once, in one place.
 		announceKeyholderRemint(l, sessionKey, pair.Reminted, stderr)
 	}
-	kh := map[string]string{"SSH_AUTH_SOCK": pair.AgentSock}
+	// The certificate path is part of the session's environment beside its agent:
+	// where a signer installs a certificate and where the session reads it.
+	kh := map[string]string{"SSH_AUTH_SOCK": pair.AgentSock, keyholder.CertEnv: keyholder.CertPathIn(pair.Dir)}
 	// Every other variable that names the operator's agent, set in the launching
 	// process, is emptied for the session (empty is unset to piggy and to ssh).
 	for _, name := range keyholder.OperatorAgentVarsIn(os.Environ()) {

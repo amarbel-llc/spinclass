@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
@@ -97,6 +100,22 @@ func CheckAgentBoundary(stateDir, worktree string, switchOn bool) error {
 			return &AgentBoundaryError{
 				Worktree: worktree, Stored: stored, SwitchOn: true,
 				Detail: fmt.Sprintf("its SSH_AUTH_SOCK names %q, not the holder socket %s", got, holder),
+			}
+		}
+		// The certificate directory is part of the same boundary (clown's digest
+		// covers binds_ro): a holder spec written before the certificate interface
+		// lacks it, and the answer is the same as for any other changed boundary.
+		certDir := keyholder.CertDirOfAgentSock(holder)
+		if !slices.Contains(spec.BindsRO, certDir) {
+			return &AgentBoundaryError{
+				Worktree: worktree, Stored: stored, SwitchOn: true,
+				Detail: fmt.Sprintf("it does not bind the certificate directory %s read-only (a session spawned before the certificate interface)", certDir),
+			}
+		}
+		if got, want := spec.Env[keyholder.CertEnv], filepath.Join(certDir, "cert.pub"); got != want {
+			return &AgentBoundaryError{
+				Worktree: worktree, Stored: stored, SwitchOn: true,
+				Detail: fmt.Sprintf("its %s names %q, not %s", keyholder.CertEnv, got, want),
 			}
 		}
 		return nil

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
@@ -87,7 +88,17 @@ func confinedKidFixture(t *testing.T, sockets, env string) (wt, specPath string)
 		t.Fatal(err)
 	}
 	specPath = confinement.UnitSpecPath(stateDir, wt)
-	stored := `{"version":1,"worktree":"/w","operator_home":"/h","result_path":"/r","binds_rw":[],"binds_ro":[],"deny_paths":[],"sockets":` + sockets + `,"env":` + env + `}`
+	// A holder spec as the builder writes it also binds the certificate directory
+	// read-only and names the certificate file.
+	bindsRO := `[]`
+	if _, after, ok := strings.Cut(sockets, `"path":"`); ok && strings.Contains(sockets, `"key-holder"`) {
+		holder, _, _ := strings.Cut(after, `"`)
+		dir := keyholder.CertDirOfAgentSock(holder)
+		bindsRO = `["` + dir + `"]`
+		env = strings.Replace(env, `{`, `{"`+keyholder.CertEnv+`":"`+filepath.Join(dir, "cert.pub")+`",`, 1)
+		env = strings.Replace(env, `,}`, `}`, 1)
+	}
+	stored := `{"version":1,"worktree":"/w","operator_home":"/h","result_path":"/r","binds_rw":[],"binds_ro":` + bindsRO + `,"deny_paths":[],"sockets":` + sockets + `,"env":` + env + `}`
 	if err := os.WriteFile(specPath, []byte(stored), 0o600); err != nil {
 		t.Fatal(err)
 	}

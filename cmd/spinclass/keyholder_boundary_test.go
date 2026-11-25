@@ -27,7 +27,13 @@ func markKidConfined(t *testing.T, wt, sockets, env string) string {
 		t.Fatal(err)
 	}
 	spec := confinement.UnitSpecPath(stateDir, wt)
-	stored := `{"version":1,"worktree":"/w","operator_home":"/h","result_path":"/r","binds_rw":[],"binds_ro":[],"deny_paths":[],"sockets":` + sockets + `,"env":` + env + `}`
+	// A holder spec as the builder writes it also binds the certificate directory
+	// read-only.
+	bindsRO := `[]`
+	if strings.Contains(sockets, `"key-holder"`) {
+		bindsRO = `["/state/keyholder/kid/cert"]`
+	}
+	stored := `{"version":1,"worktree":"/w","operator_home":"/h","result_path":"/r","binds_rw":[],"binds_ro":` + bindsRO + `,"deny_paths":[],"sockets":` + sockets + `,"env":` + env + `}`
 	if err := os.WriteFile(spec, []byte(stored), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +45,7 @@ const (
 	boundaryHolderSockets   = `[{"path":"/state/keyholder/kid/agent/agent.sock","purpose":"key-holder"}]`
 	// What the builder writes beside each: the holder spec names its socket as
 	// SSH_AUTH_SOCK, the off spec names no agent variable.
-	boundaryHolderEnv = `{"SSH_AUTH_SOCK":"/state/keyholder/kid/agent/agent.sock"}`
+	boundaryHolderEnv = `{"SSH_AUTH_SOCK":"/state/keyholder/kid/agent/agent.sock","SPINCLASS_KEYHOLDER_CERT":"/state/keyholder/kid/cert/cert.pub"}`
 	boundaryOffEnv    = `{}`
 )
 

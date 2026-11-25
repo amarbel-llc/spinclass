@@ -37,7 +37,7 @@ func writeOffSpec(t *testing.T, state string, rp worktree.ResolvedPath) {
 func writeHolderSpec(t *testing.T, state string, rp worktree.ResolvedPath) string {
 	t.Helper()
 	holder := holderSocket(t)
-	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, map[string]string{"SSH_AUTH_SOCK": holder}); err != nil {
+	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder)); err != nil {
 		t.Fatal(err)
 	}
 	return holder

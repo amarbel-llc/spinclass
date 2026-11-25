@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
@@ -18,7 +19,9 @@ const (
 )
 
 // holderSocket binds a real unix socket in a short directory (unix socket paths
-// are capped near 108 bytes) and returns its path.
+// are capped near 108 bytes) laid out as a pair's is (<session dir>/agent/
+// agent.sock, with the certificate directory <session dir>/cert beside it) and
+// returns its path.
 func holderSocket(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "kh")
@@ -26,13 +29,28 @@ func holderSocket(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	p := filepath.Join(dir, "agent.sock")
+	if err := os.MkdirAll(filepath.Join(dir, "agent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "cert"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "agent", "agent.sock")
 	l, err := net.Listen("unix", p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
 	return p
+}
+
+// holderEnv is the environment a started pair hands the spawn: the agent socket
+// and the certificate path.
+func holderEnv(holder string) map[string]string {
+	return map[string]string{
+		"SSH_AUTH_SOCK":   holder,
+		keyholder.CertEnv: filepath.Join(keyholder.CertDirOfAgentSock(holder), "cert.pub"),
+	}
 }
 
 func TestBuildUnitSpecWithAHolderBindsOnlyTheHoldersSocketAndSetsTheEnv(t *testing.T) {
@@ -82,7 +100,7 @@ func TestWriteUnitSpecWithTheKeyHolderOnNeverBindsTheOperatorsAgent(t *testing.T
 	for _, ssh := range []string{operatorAgent, ""} { // set, and gone (the sticky path)
 		t.Setenv("SSH_AUTH_SOCK", ssh)
 		holder := holderSocket(t)
-		path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, map[string]string{"SSH_AUTH_SOCK": holder})
+		path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder))
 		if err != nil {
 			t.Fatalf("SSH_AUTH_SOCK=%q: %v", ssh, err)
 		}

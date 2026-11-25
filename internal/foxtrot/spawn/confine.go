@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/safeio"
 	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -220,6 +221,11 @@ type unitSpecInput struct {
 	// holder note): when set, it is the ONLY agent socket the unit gets and
 	// sshAuthSock is not bound. "" is the key holder off.
 	holderSock string
+	// certDir is the session's certificate directory, bound READ-ONLY with
+	// holderSock set: the only new bind the key holder adds. A directory, not the
+	// file, because a bind of one file keeps the old inode after the signer's
+	// rename. "" binds nothing.
+	certDir string
 }
 
 var unitNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
@@ -309,6 +315,12 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		env := map[string]string{}
 		maps.Copy(env, spec.Env)
 		env["SSH_AUTH_SOCK"] = in.holderSock
+		if in.certDir != "" {
+			// The one file the unit reads about its certificate: the signer writes
+			// it by rename into the bound directory, so the unit sees the new file.
+			spec.BindsRO = append(spec.BindsRO, in.certDir)
+			env[keyholder.CertEnv] = filepath.Join(in.certDir, "cert.pub")
+		}
 		spec.Env = env
 		spec.Sockets = []unitSocket{{Path: in.holderSock, Purpose: keyHolderSocketPurpose}}
 	case in.sshAuthSock != "":
@@ -341,6 +353,33 @@ func keyHolderSocketFor(kh map[string]string) (string, error) {
 		return "", fmt.Errorf("the key holder's agent path %s is not a socket (mode %s): refusing to launch the confined unit", p, fi.Mode().Type())
 	}
 	return p, nil
+}
+
+// keyHolderCertDirFor validates the certificate directory the session
+// environment names (SPINCLASS_KEYHOLDER_CERT is <dir>/cert.pub) against the
+// holder socket: it must be the certificate directory of that very pair, a clean
+// absolute path that exists as a real directory (a link is refused: clown binds
+// it read-only and it must exist when the unit starts).
+func keyHolderCertDirFor(kh map[string]string, holderSock string) (string, error) {
+	file := kh[keyholder.CertEnv]
+	if file == "" {
+		return "", errors.New("the key holder is on but its certificate path is unknown: refusing to launch the confined unit")
+	}
+	dir := filepath.Dir(file)
+	if !filepath.IsAbs(file) || filepath.Clean(file) != file || filepath.Base(file) != "cert.pub" {
+		return "", fmt.Errorf("the key holder's certificate path %q is not a clean absolute path ending in cert.pub: refusing to launch the confined unit", file)
+	}
+	if want := keyholder.CertDirOfAgentSock(holderSock); dir != want {
+		return "", fmt.Errorf("the certificate directory %s is not the one of the holder socket %s (%s): refusing to launch the confined unit", dir, holderSock, want)
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return "", fmt.Errorf("the key holder's certificate directory %s is not there (%v): refusing to launch the confined unit", dir, err)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("the key holder's certificate path %s is not a directory (mode %s): refusing to launch the confined unit", dir, fi.Mode().Type())
+	}
+	return dir, nil
 }
 
 // refuseProtectedBinds fails a spec that binds or exposes a protected state
@@ -490,10 +529,13 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	// keyholderEnv non-nil is the key holder being on: its agent socket is the
 	// unit's only agent socket, and a missing or unusable one refuses the launch
 	// before anything is written (never a fallback to the operator's agent).
-	holderSock := ""
+	holderSock, certDir := "", ""
 	if keyholderEnv != nil {
 		var herr error
 		if holderSock, herr = keyHolderSocketFor(keyholderEnv); herr != nil {
+			return "", herr
+		}
+		if certDir, herr = keyHolderCertDirFor(keyholderEnv, holderSock); herr != nil {
 			return "", herr
 		}
 	}
@@ -533,7 +575,7 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	}
 	spec := buildUnitSpec(unitSpecInput{
 		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
-		sshAuthSock: sshAuthSock, holderSock: holderSock, runtimeDir: runtimeDir, wayland: wayland,
+		sshAuthSock: sshAuthSock, holderSock: holderSock, certDir: certDir, runtimeDir: runtimeDir, wayland: wayland,
 		egress: egress, env: env, handshakeDir: handshakeDir,
 		harnessConfigWritable: harnessConfigWritable, harnessRootFiles: rootFiles,
 	})

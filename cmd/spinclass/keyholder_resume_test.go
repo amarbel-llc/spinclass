@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 )
@@ -66,9 +67,23 @@ const (
 func (f entryFixture) storedSpec(t *testing.T, sockets []map[string]string, env map[string]string) string {
 	t.Helper()
 	spec := f.markConfined(t, true)
+	// A holder spec as the builder writes it also binds the pair's certificate
+	// directory read-only and names the certificate file.
+	bindsRO := []string{}
+	for _, s := range sockets {
+		if s["purpose"] == "key-holder" {
+			dir := keyholder.CertDirOfAgentSock(s["path"])
+			bindsRO = append(bindsRO, dir)
+			withCert := map[string]string{keyholder.CertEnv: filepath.Join(dir, "cert.pub")}
+			for k, v := range env {
+				withCert[k] = v
+			}
+			env = withCert
+		}
+	}
 	b, err := json.Marshal(map[string]any{
 		"version": 1, "worktree": f.wt, "operator_home": f.home, "result_path": "/state/r.json",
-		"binds_rw": []string{f.wt}, "binds_ro": []string{}, "deny_paths": []string{},
+		"binds_rw": []string{f.wt}, "binds_ro": bindsRO, "deny_paths": []string{},
 		"sockets": sockets, "env": env,
 	})
 	if err != nil {
