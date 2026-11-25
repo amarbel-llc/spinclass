@@ -120,7 +120,8 @@ closes the connection without a reply. Hello and reply bounds are above.
 When a service refuses a call for want of a right, the text has the form
 `refused: <what> needs the right "<right>"; <who> can grant it (<how>)`. Over
 MCP the refusal is JSON-RPC error code -32001. When no policy exists at all the
-text is `nothing crosses; the operator enables the bridge with <switch>`.
+text is `nothing crosses; the operator enables the bridge with <switch>`, where
+`<switch>` is the one operator switch (see "The one switch").
 
 ### Refusal texts
 
@@ -260,19 +261,39 @@ These are what clown MUST do for the listener's checks to mean anything:
    dropped it), all three are set to the EMPTY string, present and empty, not
    left unset. The frontend treats empty exactly as unset.
 5. Wait up to 10 s after starting serve for `bridge.sock` (a socket, not a
-   file). No socket means the frontend's own gate is off: clown binds nothing,
-   sets no `CLOWN_BRIDGE_SOCKET` and advertises no `bridge-v1`; the launch goes
-   on.
+   file). No socket means the frontend's listener did not start (a failed
+   start: no exact peer check wired, a bad directory, a loose mode): clown binds
+   nothing, sets no `CLOWN_BRIDGE_SOCKET` and advertises no `bridge-v1`; under
+   `"offered"` the launch goes on, under `"required"` it is refused.
 
-The launch spec carries an optional field `bridge`, written by the frontend
-(spinclass, `internal/foxtrot/spawn/confine.go`, type `BridgeMode`). Its values:
-unset (the field is omitted) or `"offered"` (the default: the launch goes on
-without a bridge when one cannot be set up, and clown's result says
-`bridge: off:<reason>`), or `"required"` (clown refuses the launch when the
-bridge cannot be set up). Any other value is refused by both sides. The default
-stays `"offered"`; making `"required"` the default is the operator's switch, not
-a code change. Today the frontend leaves the field unset: no sweatfile knob sets
-it yet.
+### The one switch
+
+The bridge has exactly ONE operator switch: the launch spec's field `bridge`,
+written by the frontend (spinclass, `internal/foxtrot/spawn/confine.go`, type
+`BridgeMode`) from the trusted-only knob `[confinement] bridge = "off" |
+"offered" | "required"` (default off; the last trusted layer wins; a repo or
+worktree layer is ignored and logged; a value it does not know refuses the
+spawn and `sc validate` reports it). The field's values:
+
+- absent or empty: the bridge is OFF. Nothing is bound, all three
+  environment variables are set to the empty string, serve does nothing.
+  `"off"` in the knob is the same OFF and the field is omitted.
+- `"offered"`: the bridge is ON. The launch goes on without a bridge when one
+  cannot be set up, and clown's result says `bridge: off:<reason>`.
+- `"required"`: the bridge is ON, and clown refuses the launch when it cannot be
+  set up (and, with the shim's `control` not held, refuses it).
+
+Any other value is refused by both sides. Making `"required"` the default is
+the operator's flip of the knob, not a code change; the flip stays the
+operator's. The frontend reads no sweatfile to decide whether to listen: serve
+listens exactly when clown exported the three variables non-empty, which clown
+does only when the field asked for the bridge. The earlier `[bridge] enable`
+stanza and clown's `CLOWN_BRIDGE_V1` are both dropped (J-M5): two switches
+meant two things to flip and a state where one was on and the other off. Clown's
+result field says `recorded`, not `on`: that the bridge was set up and its
+cgroup file written is clown's to say; the live state ("listening", "dead",
+"asked for, not listening") is the frontend's to show (state file, `sc list`,
+session-health).
 
 Inside the unit: `CLOWN_BRIDGE_SOCKET` is the socket's path (the same path as
 outside), the shim's flag is `--bridge SOCK`, and clown advertises the result
@@ -380,9 +401,11 @@ binds, and a rule for an absent owner (`ERR error`, never a held fd).
 
 ## Written disagreements (clown round 1, recorded)
 
-- A listener whose gate is off while clown waits 10 s for the socket (B-M3): a
-  rollout-order fact, not a defect: the operator switch and the frontend gate are
-  set together; clown's log line names `[bridge] enable`.
+- A listener that does not start while clown waits 10 s for the socket (B-M3):
+  with one switch (the spec field) clown names the bridge only when it is on, so
+  the wait now ends early only on a failed start (no exact peer check wired, a
+  bad directory); the earlier "gate off" case, and the log line that named
+  `[bridge] enable`, are gone with the second switch.
 - The down-message wording (B-L5) is the vector's and this contract's: clown
   does not change it alone. A wording that names a local cause is a new vector
   first.

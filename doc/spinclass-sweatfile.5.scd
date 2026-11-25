@@ -1196,6 +1196,22 @@ in the frontend).
 	warns). Probe F17 of *sc confinement-check* does not judge the files when
 	this is on.
 
+*bridge*
+	String, *"off"* (the default), *"offered"* or *"required"*: the ONE
+	operator switch of the per-session bridge
+	(docs/plans/2026-11-25-bridge-wire-v1.md). It becomes the launch spec's
+	*bridge* field, which is left out for *"off"* and for an unset knob.
+	*"offered"* asks clown for the bridge and the launch continues without it
+	when it cannot be set up; *"required"* refuses the launch then. Only when
+	clown names the bridge (it exports *CLOWN_BRIDGE_DIR*, *CLOWN_BRIDGE_UNIT*
+	and *CLOWN_BRIDGE_CGROUP_FILE* non-empty, and sets them to the empty string
+	otherwise) does *serve* listen on *bridge.sock* and answer only peers in the
+	unit's cgroup. The last trusted layer that sets it wins; a repo- or
+	worktree-level value is ignored (*sc validate* warns). Any other value
+	refuses the spawn and *sc validate* reports it. This replaces the removed
+	*[bridge]* *enable* stanza, which *sc validate* now reports as an unknown
+	field naming this key.
+
 ## [permissions]
 
 Operator-only switches over a session's own tool calls. Not merged: read only
@@ -1775,20 +1791,6 @@ holder against the operator's off cannot be started.
 	above); the direction for later (a holder for every session and an explicit
 	operator blessing) is tracked as spinclass#520 and written up in
 	docs/plans/2026-11-25-key-holder.md.
-
-## [bridge]
-
-The per-session bridge listener inside *serve*
-(docs/plans/2026-11-25-bridge-wire-v1.md). Not merged: read only from the
-global and parent-directory layers, last one that sets the key wins; a repo- or
-worktree-level table is ignored, because the listener opens a socket that the
-session's own unit can reach and an agent could otherwise switch it on.
-
-*enable*
-	Boolean. With *enable = true*, and when clown exported *CLOWN_BRIDGE_DIR* and
-	*CLOWN_BRIDGE_UNIT*, *serve* listens on *bridge.sock* in that directory and
-	answers only peers running in the named unit's cgroup. Off when unset. Any
-	failure to start the listener is logged and *serve* runs without it.
 
 ## [host-queue]
 
