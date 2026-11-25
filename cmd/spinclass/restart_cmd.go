@@ -673,6 +673,14 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 			return refuse(err.Error())
 		}
 	}
+	// clown re-reads the stored unit spec on a restart in place and refuses a
+	// changed boundary. A confined session whose stored spec binds a different
+	// agent socket than the key holder switch says now is refused here, before a
+	// pair is started for a relaunch that will not happen: a changed agent means
+	// a new session (B-F2 / A-H1).
+	if err := relaunchBoundaryBeforeRestartFn(st); err != nil {
+		return refuse(boundaryRestartRefusal(err))
+	}
 	// clown relaunches without `sc resume`, so a dead key holder pair is
 	// restarted (and a changed key announced) HERE, before the relaunch: no
 	// restart may bring a session back on a holder socket nothing listens on.
@@ -906,8 +914,11 @@ func runRestartRearm(target string) (restartVerdict, error) {
 		return refuse("a session may not widen its own permissions")
 	}
 	if !stopping {
-		// The same check as the plain preflight: the relaunch this re-arm restores
-		// must not come back on a dead key holder socket.
+		// The same checks as the plain preflight: the relaunch this re-arm restores
+		// must not come back on a changed agent boundary or a dead key holder socket.
+		if err := relaunchBoundaryBeforeRestartFn(st); err != nil {
+			return refuse(boundaryRestartRefusal(err))
+		}
 		if err := keyholderBeforeRestartFn(st, os.Stderr); err != nil {
 			return refuse(keyholderRestartRefusal(st, err))
 		}

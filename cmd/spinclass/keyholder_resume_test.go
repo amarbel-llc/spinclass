@@ -31,7 +31,11 @@ func stubKeyholderLaunch(t *testing.T, kh map[string]string, undo func(), err er
 		calls = append(calls, launchCall{spawned: spawned, session: sessionKey})
 		return kh, undo, err
 	}
-	t.Cleanup(func() { keyholderLaunchEnvFn = prev })
+	// The switch is on exactly when the stub hands out an environment: the
+	// boundary check reads it through its own seam, before any pair is started.
+	prevWants := keyholderWantsPairFn
+	keyholderWantsPairFn = func(_, _ string, _ bool) (bool, error) { return kh != nil, nil }
+	t.Cleanup(func() { keyholderLaunchEnvFn = prev; keyholderWantsPairFn = prevWants })
 	return &calls
 }
 
@@ -101,83 +105,101 @@ func confinedFixture(t *testing.T) entryFixture {
 	return f
 }
 
-// B-F2 / A-H1: the switch is ON now, the stored spec was written with it off and
-// binds the operator's agent: the resume must replace it with the holder's.
-func TestResumeWithTheKeyHolderOnRewritesAStoredSpecThatBindsTheOperatorsAgent(t *testing.T) {
+// B-F2 / A-H1, option (a): the switch is ON now and the stored spec was written
+// with it off, so it binds the operator's agent. clown would refuse the relaunch
+// of a changed boundary and would otherwise rebind the operator's socket, so the
+// resume is refused BEFORE a pair is started and before attach, naming the change
+// and saying to close the session and spawn a new one. The spec is not rewritten.
+func TestResumeWithTheKeyHolderOnRefusesAStoredSpecThatBindsTheOperatorsAgent(t *testing.T) {
 	f := confinedFixture(t)
 	spec := f.storedSpec(t, []map[string]string{{"path": resumeStoredOperatorAgent, "purpose": "piggy-agent"}}, map[string]string{"TMPDIR": "/t"})
-	holder := shortSocket(t)
-	stubKeyholderLaunch(t, map[string]string{"SSH_AUTH_SOCK": holder}, nil, nil)
+	before, _ := os.ReadFile(spec)
+	calls := stubKeyholderLaunch(t, map[string]string{"SSH_AUTH_SOCK": shortSocket(t)}, nil, nil)
 	c := stubAttach(t)
 
-	if err := resumeFeat(t); err != nil {
-		t.Fatalf("resume: %v", err)
+	err := resumeFeat(t)
+	if err == nil {
+		t.Fatal("a stored spec binding the operator's agent was resumed with the switch on")
 	}
-	if !c.called {
-		t.Fatal("the resume never reached attach")
+	for _, want := range []string{"the operator's agent socket", "[keyholder] mode", "close this session and spawn a new one"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
 	}
-	v, raw := readSpecView(t, spec)
-	if len(v.Sockets) != 1 || v.Sockets[0].Path != holder || v.Sockets[0].Purpose != "key-holder" {
-		t.Errorf("sockets = %+v, want only the holder's", v.Sockets)
+	if c.called {
+		t.Error("the refused resume reached attach")
 	}
-	if v.Env["SSH_AUTH_SOCK"] != holder || v.Env["TMPDIR"] != "/t" {
-		t.Errorf("env = %v, want SSH_AUTH_SOCK=holder and the rest kept", v.Env)
+	if len(*calls) != 0 {
+		t.Errorf("a pair was started for a relaunch that was refused: %+v", *calls)
 	}
-	if strings.Contains(raw, resumeStoredOperatorAgent) || strings.Contains(raw, "piggy-agent") {
-		t.Errorf("the operator's agent is still in the stored spec:\n%s", raw)
+	if after, _ := os.ReadFile(spec); string(after) != string(before) {
+		t.Error("the stored spec was rewritten")
 	}
 }
 
 // B-F2 scenario B: the switch is OFF now and the stored spec names a holder
-// socket that is gone: the resume must restore the switch-off shape.
-func TestResumeWithTheKeyHolderOffRestoresAStoredSpecNamingADeadHolder(t *testing.T) {
+// socket the pair no longer serves: refused, never relaunched on a dead path.
+func TestResumeWithTheKeyHolderOffRefusesAStoredSpecNamingAHolder(t *testing.T) {
 	f := confinedFixture(t)
 	t.Setenv("SSH_AUTH_SOCK", resumeStoredOperatorAgent)
 	spec := f.storedSpec(t, []map[string]string{{"path": resumeStoredDeadHolder, "purpose": "key-holder"}}, map[string]string{"SSH_AUTH_SOCK": resumeStoredDeadHolder, "TMPDIR": "/t"})
+	before, _ := os.ReadFile(spec)
 	stubKeyholderLaunch(t, nil, nil, nil)
 	c := stubAttach(t)
 
-	if err := resumeFeat(t); err != nil {
-		t.Fatalf("resume: %v", err)
+	err := resumeFeat(t)
+	if err == nil {
+		t.Fatal("a stored spec binding a holder was resumed with the switch off")
 	}
-	if !c.called {
-		t.Fatal("the resume never reached attach")
+	for _, want := range []string{"a key holder socket", "close this session and spawn a new one"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
 	}
-	v, raw := readSpecView(t, spec)
-	if len(v.Sockets) != 1 || v.Sockets[0].Path != resumeStoredOperatorAgent || v.Sockets[0].Purpose != "piggy-agent" {
-		t.Errorf("sockets = %+v, want the switch-off shape (the operator's agent)", v.Sockets)
+	if c.called {
+		t.Error("the refused resume reached attach")
 	}
-	if _, has := v.Env["SSH_AUTH_SOCK"]; has {
-		t.Errorf("env still names SSH_AUTH_SOCK: %v", v.Env)
-	}
-	if strings.Contains(raw, resumeStoredDeadHolder) {
-		t.Errorf("the dead holder path is still in the stored spec:\n%s", raw)
+	if after, _ := os.ReadFile(spec); string(after) != string(before) {
+		t.Error("the stored spec was rewritten")
 	}
 }
 
-// Fail closed: the switch is on but the holder's socket is unusable. The resume
-// is refused, nothing is attached, and a pair this resume just started is stopped.
-func TestResumeWithAnUnusableHolderSocketRefusesAndStopsTheNewPair(t *testing.T) {
-	f := confinedFixture(t)
-	spec := f.storedSpec(t, []map[string]string{{"path": resumeStoredOperatorAgent, "purpose": "piggy-agent"}}, map[string]string{})
-	before, _ := os.ReadFile(spec)
-	undone := false
-	stubKeyholderLaunch(t, map[string]string{"SSH_AUTH_SOCK": filepath.Join(t.TempDir(), "absent.sock")}, func() { undone = true }, nil)
-	c := stubAttach(t)
-
-	err := resumeFeat(t)
-	if err == nil || !strings.Contains(err.Error(), "key holder") {
-		t.Fatalf("resume = %v, want a refusal naming the key holder", err)
-	}
-	if c.called {
-		t.Error("a session with an unusable holder was attached")
-	}
-	if !undone {
-		t.Error("the pair this resume started was left running")
-	}
-	if after, _ := os.ReadFile(spec); string(after) != string(before) {
-		t.Error("the stored spec was rewritten on a refusal")
-	}
+// Matching modes resume exactly as before: a holder spec with the switch on, an
+// off spec with the switch off. The stored spec is handed to clown untouched.
+func TestResumeWhenTheStoredSpecMatchesTheSwitchRelaunchesAsBefore(t *testing.T) {
+	t.Run("holder spec, switch on", func(t *testing.T) {
+		f := confinedFixture(t)
+		holder := shortSocket(t)
+		spec := f.storedSpec(t, []map[string]string{{"path": holder, "purpose": "key-holder"}}, map[string]string{"SSH_AUTH_SOCK": holder})
+		before, _ := os.ReadFile(spec)
+		stubKeyholderLaunch(t, map[string]string{"SSH_AUTH_SOCK": holder}, nil, nil)
+		c := stubAttach(t)
+		if err := resumeFeat(t); err != nil {
+			t.Fatalf("resume: %v", err)
+		}
+		if !c.called {
+			t.Error("the resume never reached attach")
+		}
+		if after, _ := os.ReadFile(spec); string(after) != string(before) {
+			t.Error("the stored spec was changed")
+		}
+	})
+	t.Run("off spec, switch off", func(t *testing.T) {
+		f := confinedFixture(t)
+		spec := f.storedSpec(t, []map[string]string{{"path": resumeStoredOperatorAgent, "purpose": "piggy-agent"}}, map[string]string{})
+		before, _ := os.ReadFile(spec)
+		stubKeyholderLaunch(t, nil, nil, nil)
+		c := stubAttach(t)
+		if err := resumeFeat(t); err != nil {
+			t.Fatalf("resume: %v", err)
+		}
+		if !c.called {
+			t.Error("the resume never reached attach")
+		}
+		if after, _ := os.ReadFile(spec); string(after) != string(before) {
+			t.Error("the stored spec was changed")
+		}
+	})
 }
 
 // Call sites (clarabell's ask): `sc start` reports spawned=false and `sc resume`

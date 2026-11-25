@@ -71,10 +71,13 @@ func TestStartHandoffWithTheKeyHolderOnGivesTheChildItsOwnHolderAndNotTheCallers
 	}
 }
 
-// A confined child gets ITS OWN spec as the scope, brought in line with the
-// switch, never the caller's, and never the operator's agent bound.
-func TestStartHandoffOfAConfinedChildHandsItsOwnRetargetedSpec(t *testing.T) {
-	_, wt := stoppedChildFixture(t, "holder", "observe,start", true)
+// confinedKidFixture makes worker/kid a confined stopped child whose stored unit
+// spec binds the given sockets, and returns the child's worktree and spec path. A
+// confined child can be started through the hand-off only when a frontend
+// principal mapping names it (ownerPrincipal); a confined spawn leaves one.
+func confinedKidFixture(t *testing.T, sockets, env string) (wt, specPath string) {
+	t.Helper()
+	_, wt = stoppedChildFixture(t, "holder", "observe,start", true)
 	stateDir := os.Getenv("XDG_STATE_HOME")
 	rec := confinement.UnitRecordPath(stateDir, wt)
 	if err := os.MkdirAll(filepath.Dir(rec), 0o700); err != nil {
@@ -83,28 +86,120 @@ func TestStartHandoffOfAConfinedChildHandsItsOwnRetargetedSpec(t *testing.T) {
 	if err := os.WriteFile(rec, []byte(`{"principal":"p"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	specPath := confinement.UnitSpecPath(stateDir, wt)
-	const stored = `{"version":1,"worktree":"/w","operator_home":"/h","result_path":"/r","binds_rw":[],"binds_ro":[],"deny_paths":[],"sockets":[{"path":"/run/user/1000/piggy-agent.sock","purpose":"piggy-agent"}],"env":{}}`
+	specPath = confinement.UnitSpecPath(stateDir, wt)
+	stored := `{"version":1,"worktree":"/w","operator_home":"/h","result_path":"/r","binds_rw":[],"binds_ro":[],"deny_paths":[],"sockets":` + sockets + `,"env":` + env + `}`
 	if err := os.WriteFile(specPath, []byte(stored), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A confined child can be started through the hand-off only when a frontend
-	// principal mapping names it (ownerPrincipal); a confined spawn leaves one.
 	writeFrontendMapping(t, "kid-principal", "worker/kid", wt)
-	t.Setenv("CLOWN_AGENT_SCOPE", "/callers/own/spec.json")
+	return wt, specPath
+}
+
+// A confined child whose stored spec matches the switch (a holder spec, switch
+// on) gets ITS OWN spec as the scope, never the caller's, and the state
+// directory clown finds its sidecar record under, and the spec is left untouched.
+func TestStartHandoffOfAConfinedChildHandsItsOwnSpecAndStateDir(t *testing.T) {
 	holder := shortSocket(t)
+	_, specPath := confinedKidFixture(t, `[{"path":"`+holder+`","purpose":"key-holder"}]`, `{"SSH_AUTH_SOCK":"`+holder+`"}`)
+	before, _ := os.ReadFile(specPath)
+	t.Setenv("CLOWN_AGENT_SCOPE", "/callers/own/spec.json")
 	stubKeyholderLaunch(t, map[string]string{"SSH_AUTH_SOCK": holder}, nil, nil)
 	hand := stubStartHandoffExec(t, nil)
 
 	if text, isErr := callStartChild(t, `{"child":"worker/kid","message":"carry on"}`); isErr {
 		t.Fatalf("start: %s", text)
 	}
+	if hand.calls != 1 {
+		t.Fatalf("hand-off ran %d time(s), want 1", hand.calls)
+	}
 	if v, _ := envValue(hand.env, "CLOWN_AGENT_SCOPE"); v != specPath {
 		t.Errorf("CLOWN_AGENT_SCOPE = %q, want the child's own spec %q", v, specPath)
 	}
-	v, raw := readSpecView(t, specPath)
-	if len(v.Sockets) != 1 || v.Sockets[0].Path != holder || strings.Contains(raw, "piggy-agent") {
-		t.Errorf("the child's stored spec still binds the operator's agent or not the holder: %s", raw)
+	if v, _ := envValue(hand.env, "XDG_STATE_HOME"); v != os.Getenv("XDG_STATE_HOME") || v == "" {
+		t.Errorf("XDG_STATE_HOME = %q, want the frontend's state directory %q", v, os.Getenv("XDG_STATE_HOME"))
+	}
+	if after, _ := os.ReadFile(specPath); string(after) != string(before) {
+		t.Error("the child's stored spec was rewritten")
+	}
+}
+
+// B-F2 for the start hand-off, switch ON: a confined child whose stored spec still
+// binds the operator's agent is refused BEFORE a pair is started and before clown
+// is called; the child stays stopped.
+func TestStartHandoffOfAConfinedChildBindingTheOperatorsAgentIsRefusedWithTheSwitchOn(t *testing.T) {
+	_, specPath := confinedKidFixture(t, `[{"path":"/run/user/1000/piggy-agent.sock","purpose":"piggy-agent"}]`, `{}`)
+	before, _ := os.ReadFile(specPath)
+	calls := stubKeyholderLaunch(t, map[string]string{"SSH_AUTH_SOCK": shortSocket(t)}, nil, nil)
+	hand := stubStartHandoffExec(t, nil)
+
+	text, isErr := callStartChild(t, `{"child":"worker/kid","message":"carry on"}`)
+	if !isErr {
+		t.Fatalf("a confined child binding the operator's agent was started: %s", text)
+	}
+	for _, want := range []string{"the operator's agent socket", "close this session and spawn a new one"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the refusal does not say %q: %s", want, text)
+		}
+	}
+	if hand.calls != 0 {
+		t.Errorf("the hand-off ran %d time(s) for a refused start", hand.calls)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("a pair was started for a refused start: %+v", *calls)
+	}
+	if after, _ := os.ReadFile(specPath); string(after) != string(before) {
+		t.Error("the child's stored spec was rewritten")
+	}
+}
+
+// B-F2 for the start hand-off, switch OFF: a confined child whose stored spec
+// binds a holder socket is refused too (the hand-off would otherwise inherit the
+// caller's environment and let clown relaunch on a path nothing serves).
+func TestStartHandoffOfAConfinedChildBindingAHolderIsRefusedWithTheSwitchOff(t *testing.T) {
+	confinedKidFixture(t, `[{"path":"/state/keyholder/gone/agent/agent.sock","purpose":"key-holder"}]`, `{"SSH_AUTH_SOCK":"/state/keyholder/gone/agent/agent.sock"}`)
+	stubKeyholderLaunch(t, nil, nil, nil)
+	hand := stubStartHandoffExec(t, nil)
+
+	text, isErr := callStartChild(t, `{"child":"worker/kid","message":"carry on"}`)
+	if !isErr {
+		t.Fatalf("a confined child binding a holder was started with the switch off: %s", text)
+	}
+	if !strings.Contains(text, "a key holder socket") || !strings.Contains(text, "close this session and spawn a new one") {
+		t.Errorf("the refusal does not name the change: %s", text)
+	}
+	if hand.calls != 0 {
+		t.Errorf("the hand-off ran %d time(s) for a refused start", hand.calls)
+	}
+}
+
+// coco's point 3: clown confines a started child by its sidecar record under the
+// child's XDG_STATE_HOME, else by CLOWN_AGENT_SCOPE; an environment with neither
+// starts a stopped confined session UNCONFINED. spinclass refuses such an
+// environment before clown is called.
+func TestCheckHandoffEnvRefusesAnEnvironmentClownCouldNotConfineFrom(t *testing.T) {
+	const scope = "/state/spinclass/units/kid.spec.json"
+	for _, tc := range []struct {
+		name  string
+		env   map[string]string
+		scope string
+		want  string // substring of the refusal, "" = accepted
+	}{
+		{"no XDG_STATE_HOME", map[string]string{"CLOWN_AGENT_SCOPE": scope}, scope, "XDG_STATE_HOME"},
+		{"relative XDG_STATE_HOME", map[string]string{"XDG_STATE_HOME": "state", "CLOWN_AGENT_SCOPE": scope}, scope, "XDG_STATE_HOME"},
+		{"confined child without its own scope", map[string]string{"XDG_STATE_HOME": "/state"}, scope, "CLOWN_AGENT_SCOPE"},
+		{"confined child with the caller's scope", map[string]string{"XDG_STATE_HOME": "/state", "CLOWN_AGENT_SCOPE": "/callers/spec.json"}, scope, "CLOWN_AGENT_SCOPE"},
+		{"both present", map[string]string{"XDG_STATE_HOME": "/state", "CLOWN_AGENT_SCOPE": scope}, scope, ""},
+		{"unconfined child needs no scope", map[string]string{"XDG_STATE_HOME": "/state"}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkHandoffEnv(tc.env, tc.scope)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("refused: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Errorf("err = %v, want a refusal naming %s", err, tc.want)
+			}
+		})
 	}
 }
 
