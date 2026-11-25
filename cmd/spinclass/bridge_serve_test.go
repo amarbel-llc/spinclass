@@ -6,10 +6,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/clown/pkgs/peercheck"
 	"code.linenisgreat.com/spinclass/internal/0/bridge"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
@@ -54,13 +56,16 @@ func withCgroupFile(base func(string) string, file string) func(string) string {
 	}
 }
 
-// Production wiring: with the env and the trusted [bridge] enable both set, a
-// build that has no exact peer check wired stays off, with the named reason,
-// and leaves nothing in the bridge directory. When a clown that has
-// CheckPeerExact is wired this test is replaced by one that it listens.
-func TestProductionWiringStaysOffUntilAnExactPeerCheckIsWired(t *testing.T) {
-	if bridgeCheckPeer != nil {
-		t.Fatal("this build wires an exact peer check: replace this test with the one that pins that wiring")
+// Production wiring: the build's peer check IS clown's strict
+// peercheck.CheckPeerExact, not a stand-in. With the env and the trusted
+// [bridge] enable both set the listener starts; with either missing it stays
+// off.
+func TestProductionWiringIsClownsExactPeerCheck(t *testing.T) {
+	if bridgeCheckPeer == nil {
+		t.Fatal("no exact peer check is wired: the bridge can never start")
+	}
+	if got, want := reflect.ValueOf(bridgeCheckPeer).Pointer(), reflect.ValueOf(peercheck.CheckPeerExact).Pointer(); got != want {
+		t.Fatalf("bridgeCheckPeer is not peercheck.CheckPeerExact")
 	}
 	home := t.TempDir()
 	repo := filepath.Join(home, "work", "repo")
@@ -88,15 +93,25 @@ func TestProductionWiringStaysOffUntilAnExactPeerCheckIsWired(t *testing.T) {
 	t.Cleanup(func() { bridgeResolve = old })
 
 	stop := startBridge(context.Background(), e2eHandlerFactory())
-	if stop != nil {
-		stop()
-		t.Fatal("the bridge listens with no exact peer check wired")
+	if stop == nil {
+		t.Fatalf("env, trusted enable and the real exact check are set, yet the bridge is off: %v", *failures)
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Errorf("the bridge directory is not empty: %v", entries)
+	defer stop()
+	if _, err := os.Lstat(filepath.Join(dir, "bridge.sock")); err != nil {
+		t.Errorf("the listener left no socket: %v", err)
 	}
-	if len(*failures) != 1 || !strings.Contains((*failures)[0], "peercheck.CheckPeerExact") {
-		t.Errorf("failures = %v, want one naming peercheck.CheckPeerExact", *failures)
+	if len(*failures) != 0 {
+		t.Errorf("failures = %v, want none", *failures)
+	}
+
+	// Either switch missing keeps it off: no env names no bridge, no trusted
+	// enable names the reason.
+	if p := resolveBridgePlan(bridgeTestEnv("", ""), home, repo); p.Dir != "" || !p.Quiet {
+		t.Errorf("no env must mean no bridge: %+v", p)
+	}
+	noEnable := t.TempDir()
+	if p := resolveBridgePlan(getenv, noEnable, filepath.Join(noEnable, "work", "repo")); p.Dir != "" || p.Reason == "" {
+		t.Errorf("no trusted enable must mean no bridge with a reason: %+v", p)
 	}
 }
 

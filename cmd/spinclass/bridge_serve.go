@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"code.linenisgreat.com/clown/pkgs/peercheck"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
@@ -36,10 +37,11 @@ type bridgePlan struct {
 const bridgeEnvUnsetReason = "CLOWN_BRIDGE_DIR or CLOWN_BRIDGE_UNIT is unset or empty: clown named no bridge for this session"
 
 // bridgeCheckPeer is the exact peer check this build wires into the listener:
-// clown's peercheck.CheckPeerExact(conn, wantCgroup). It is nil until a clown
-// that has it is merged and pinned; a nil check keeps the bridge off with a
-// named reason (bridgeserver.ErrNoPeerCheck), never a weaker default.
-var bridgeCheckPeer func(conn net.Conn, wantCgroup string) error
+// clown's peercheck.CheckPeerExact(conn, wantCgroup): the peer's cgroup must
+// equal the unit's, strictly (no descendants), and a peer with no pidfd is
+// refused. A nil check keeps the bridge off with a named reason
+// (bridgeserver.ErrNoPeerCheck), never a weaker default; tests swap it.
+var bridgeCheckPeer func(conn net.Conn, wantCgroup string) error = peercheck.CheckPeerExact
 
 // resolveBridgePlan turns the environment clown exported and the trusted
 // [bridge] switch into a plan. Both must hold: the env names where and for

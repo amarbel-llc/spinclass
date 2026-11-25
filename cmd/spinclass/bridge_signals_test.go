@@ -47,9 +47,10 @@ func TestAFailedBridgeStartIsADeadListenerMarkedDownAndWokenOncePerInterval(t *t
 	orig := bridgeResolve
 	bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit, CgroupFile: "/x/y"} }
 	t.Cleanup(func() { bridgeResolve = orig })
-	if bridgeCheckPeer != nil {
-		t.Fatal("this build wires an exact peer check; this test needs the start to fail")
-	}
+	// A start that fails: no peer check wired.
+	origCheck := bridgeCheckPeer
+	bridgeCheckPeer = nil
+	t.Cleanup(func() { bridgeCheckPeer = origCheck })
 
 	if stop := startBridge(context.Background(), e2eHandlerFactory()); stop != nil {
 		stop()
