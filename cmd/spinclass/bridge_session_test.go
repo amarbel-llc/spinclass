@@ -208,15 +208,14 @@ func TestBridgeSessionRefusesConfinedVerbsWithTheContractError(t *testing.T) {
 	sock, _ := startSessionBridge(t)
 	p := dialSession(t, sock)
 	p.initialize(protocol.ProtocolVersionV1)
-	for tool, op := range map[string]string{
-		"session-health":                  "sc session-health",
-		"update-this-session-description": "sc update-description",
+	for tool, want := range map[string]string{
+		"session-health":                  refusalSessionHealth,
+		"update-this-session-description": refusalUpdateDesc,
 	} {
 		rep := p.call("tools/call", map[string]any{"name": tool, "arguments": map[string]any{"description": "x"}})
 		if rep.Error == nil {
 			t.Fatalf("%s: want an error, got %s", tool, rep.Result)
 		}
-		want := "refused: " + tool + " is not available to a session inside its unit; ask the operator (they hold it, by running `" + op + "` at a terminal outside the unit)"
 		if rep.Error.Code != -32001 || rep.Error.Message != want {
 			t.Errorf("%s: got code %d %q\nwant -32001 %q", tool, rep.Error.Code, rep.Error.Message, want)
 		}

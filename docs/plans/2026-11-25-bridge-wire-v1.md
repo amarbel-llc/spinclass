@@ -79,6 +79,31 @@ When a service refuses a call for want of a right, the text has the form
 MCP the refusal is JSON-RPC error code -32001. When no policy exists at all the
 text is `nothing crosses; the operator enables the bridge with <switch>`.
 
+### Refusal texts
+
+The `session` service's verbs, each refusal exactly as the frontend sends it
+(JSON-RPC error -32001, the text prefixed `refused: `). A text names what is
+true: where a verb is gated only because the caller is inside its unit, it has
+no right a session could hold (the rights `observe`, `close`, `restart` and the
+rest are rights of a holder over a child, which a caller inside its unit is not
+allowed to use), and it says who may do the thing instead. No text carries a
+value from the request.
+
+| Verb | Over the bridge |
+| --- | --- |
+| `whoami` | Never refused: it answers for the session the listener was created for, whatever the request names. |
+| `list-handles` | Plain listing is allowed. With `accept` (or arguments that do not parse): `refused: list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)` |
+| `restart-this-session` | Allowed on the session itself. Without the trusted hand-off: `refused: restart-this-session needs the trusted [session-entry].restart hand-off; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
+| `cancel-restart` | With no `child`, cancels this session's own queued restart: allowed. Naming a child: `refused: cancel-restart naming another session needs the right "restart" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)` |
+| `close-this-session` | Allowed on the session itself. Without the trusted setting: `refused: close-this-session needs the trusted [permissions].allow-self-close = true; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
+| `session-health` | `refused: session-health has no right a session inside its unit can be granted; the operator runs `sc session-health` at a terminal outside the unit, and a session holding a handle on this one reads its health with session-health from outside the unit` |
+| `update-this-session-description` | `refused: update-this-session-description has no right a session inside its unit can be granted (a description is shown to every session, so it is the operator's to set); the operator runs `sc update-description` at a terminal outside the unit` |
+
+A session verb refused for any other reason (a running job, a missing session,
+an obstacle to a restart or close that is not a missing setting) is a tool
+result with `isError`, not a refusal. A call to a tool outside the seven is
+-32602, `unknown tool: <name>`.
+
 ## Failure text
 
 When the shim cannot reach the frontend (no socket, refused connect, closed

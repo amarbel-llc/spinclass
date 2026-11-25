@@ -131,6 +131,14 @@ func expandRestartHandoff(argv []string, principal, key, when, posture, reason s
 	return out
 }
 
+// restartHandoffMissingObstacle is why a session cannot be restarted when the
+// trusted layers name no hand-off.
+func restartHandoffMissingObstacle(key string) string {
+	return fmt.Sprintf(
+		"%s cannot be restarted: no restart hand-off is configured; an operator must set `restart` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)",
+		key)
+}
+
 // restartPlan returns the hand-off argv template for st and why st must not be
 // restarted right now ("" when it may). It is the checks both tools and the
 // preflight share, so a request that passes here is one the preflight also
@@ -155,9 +163,7 @@ func restartPlan(st *session.State, principal string, force bool) (argv []string
 	}
 	argv, _ = sweatfileio.TrustedRestartHandoff(h, home, st.RepoPath)
 	if len(argv) == 0 {
-		return nil, fmt.Sprintf(
-			"%s cannot be restarted: no restart hand-off is configured; an operator must set `restart` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)",
-			st.Key()), nil
+		return nil, restartHandoffMissingObstacle(st.Key()), nil
 	}
 
 	// force is the operator-approved escalation (always-ask in perms.AlwaysAsk,
@@ -241,6 +247,9 @@ func queueRestartPosture(st *session.State, requester, principal, reason string,
 		return "", err
 	}
 	if obstacle != "" {
+		if obstacle == restartHandoffMissingObstacle(st.Key()) {
+			return "", &settingAbsentError{msg: obstacle, kind: settingRestartHandoff}
+		}
 		return "", errors.New(obstacle)
 	}
 	if obstacle := postureObstacle(st, posture); obstacle != "" {
@@ -348,7 +357,10 @@ func runRestartThisSession(p restartThisSessionParams) (string, error) {
 }
 
 // handleRestartThisSession is the `restart-this-session` MCP tool handler.
-func handleRestartThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+//
+// Over the bridge, the refusal for want of the trusted hand-off is in the
+// contract's text (bridgeRestartSelfRefusal); every other outcome is unchanged.
+func handleRestartThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var p restartThisSessionParams
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &p); err != nil {
@@ -357,7 +369,7 @@ func handleRestartThisSession(_ context.Context, args json.RawMessage, _ command
 	}
 	text, err := runRestartThisSession(p)
 	if err != nil {
-		return command.TextErrorResult(err.Error()), nil
+		return bridgeSettingRefusal(ctx, err, settingRestartHandoff, bridgeRestartSelfRefusal), nil
 	}
 	return command.TextResult(text), nil
 }

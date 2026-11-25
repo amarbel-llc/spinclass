@@ -603,7 +603,7 @@ func TestE2EConfinedVerbIsMinus32001AndUnlistedToolIsMinus32602(t *testing.T) {
 	p.initialize(protocol.ProtocolVersionV1)
 
 	rep := p.call("tools/call", map[string]any{"name": "session-health", "arguments": map[string]any{}})
-	const want = "refused: session-health is not available to a session inside its unit; ask the operator (they hold it, by running `sc session-health` at a terminal outside the unit)"
+	const want = refusalSessionHealth
 	if rep.Error == nil || rep.Error.Code != -32001 || rep.Error.Message != want {
 		t.Errorf("session-health: %+v, want -32001 %q", rep.Error, want)
 	}

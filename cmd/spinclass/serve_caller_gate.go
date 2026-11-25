@@ -17,8 +17,12 @@ const bridgeRefusalPrefix = "refused: "
 
 // bridgeRefusalText is the refusal for a verb that has no named right a
 // session inside its unit could be granted: it is the operator's, at a
-// terminal outside the unit.
+// terminal outside the unit. The session verbs have their own text
+// (bridgeSessionRefusals); the rest share this one.
 func bridgeRefusalText(tool, operatorCommand string) string {
+	if text, ok := bridgeSessionRefusals[tool]; ok {
+		return text
+	}
 	return fmt.Sprintf("%s%s is not available to a session inside its unit; ask the operator (they hold it, by running `%s` at a terminal outside the unit)",
 		bridgeRefusalPrefix, tool, operatorCommand)
 }

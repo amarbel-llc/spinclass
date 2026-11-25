@@ -53,6 +53,14 @@ func selfCloseScope(st *session.State) (bool, error) {
 	return allow, nil
 }
 
+// selfCloseNotAllowedObstacle is why a session may not close itself when no
+// trusted layer allows it.
+func selfCloseNotAllowedObstacle(key string) string {
+	return fmt.Sprintf(
+		"%s is not allowed to close itself: an operator must set `allow-self-close = true` under [permissions] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)",
+		key)
+}
+
 // selfCloseObstacle returns why st must not close right now, or "" when it may.
 // It is the checks the tool and the runner share, so a request that passes here
 // is one the runner will also accept unless something changed in between.
@@ -62,9 +70,7 @@ func selfCloseObstacle(st *session.State, principal string) (string, error) {
 		return "", err
 	}
 	if !allowed {
-		return fmt.Sprintf(
-			"%s is not allowed to close itself: an operator must set `allow-self-close = true` under [permissions] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)",
-			st.Key()), nil
+		return selfCloseNotAllowedObstacle(st.Key()), nil
 	}
 
 	if j, jerr := job.Read(st.WorktreePath); jerr == nil && j.Status == job.StatusRunning {
@@ -151,6 +157,9 @@ func runCloseThisSession(args json.RawMessage) (string, error) {
 		return "", err
 	}
 	if obstacle != "" {
+		if obstacle == selfCloseNotAllowedObstacle(st.Key()) {
+			return "", &settingAbsentError{msg: obstacle, kind: settingAllowSelfClose}
+		}
 		return "", errors.New(obstacle)
 	}
 
@@ -166,11 +175,13 @@ func runCloseThisSession(args json.RawMessage) (string, error) {
 		st.Key()), nil
 }
 
-// handleCloseThisSession is the `close-this-session` MCP tool handler.
-func handleCloseThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+// handleCloseThisSession is the `close-this-session` MCP tool handler. Over the
+// bridge, the refusal for want of allow-self-close is in the contract's text
+// (bridgeCloseSelfRefusal); every other outcome is unchanged.
+func handleCloseThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	text, err := runCloseThisSession(args)
 	if err != nil {
-		return command.TextErrorResult(err.Error()), nil
+		return bridgeSettingRefusal(ctx, err, settingAllowSelfClose, bridgeCloseSelfRefusal), nil
 	}
 	return command.TextResult(text), nil
 }

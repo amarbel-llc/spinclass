@@ -52,9 +52,17 @@ func TestBridgedCallIsConfinedWhateverTheServeClassifies(t *testing.T) {
 			if !res.IsErr {
 				t.Fatalf("%s: a bridged call must be refused, got %q", h.tool, res.Text)
 			}
-			for _, want := range []string{"refused: ", h.tool, "not available to a session inside its unit", "ask the operator", "`" + h.operatorCommand + "`"} {
-				if !strings.Contains(res.Text, want) {
-					t.Errorf("%s: refusal %q does not contain %q", h.tool, res.Text, want)
+			if specific, ok := bridgeSessionRefusals[h.tool]; ok {
+				// The session verbs have their own table text (the plan's
+				// "Refusal texts"); the others share the generic one.
+				if res.Text != specific {
+					t.Errorf("%s: refusal %q, want the table text %q", h.tool, res.Text, specific)
+				}
+			} else {
+				for _, want := range []string{"refused: ", h.tool, "not available to a session inside its unit", "ask the operator", "`" + h.operatorCommand + "`"} {
+					if !strings.Contains(res.Text, want) {
+						t.Errorf("%s: refusal %q does not contain %q", h.tool, res.Text, want)
+					}
 				}
 			}
 			if !strings.HasPrefix(res.Text, "refused: ") {
