@@ -22,7 +22,7 @@ var operatorAgentVars = map[string]bool{
 
 // IsOperatorAgentVar reports whether name is an environment variable that
 // points a process at the operator's agent (or at his askpass). A session on
-// its own key must not inherit it; see the package doc and spinclass-keyholder.
+// its own key must not inherit it; see the package doc and the [keyholder] section of spinclass-sweatfile(5).
 func IsOperatorAgentVar(name string) bool {
 	return operatorAgentVars[name] || strings.HasPrefix(name, "SSH_ASKPASS")
 }

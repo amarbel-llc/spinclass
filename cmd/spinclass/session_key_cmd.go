@@ -126,6 +126,10 @@ func registerSessionKeyCommand(app *command.App) {
 			{Name: "session", Type: command.String, Required: true, Description: "Session key (<repo>/<branch>) or worktree name"},
 			{Name: "json", Type: command.Bool, Description: "Print one JSON object instead of the two lines"},
 		},
+		Examples: []command.Example{
+			{Description: "Print a session's key holder public key and fingerprint (two lines), for the operator to certify", Command: "sc session-key repo/branch"},
+			{Description: "The same as one JSON object, with the certificate path and what is known about an installed certificate", Command: "sc session-key --json repo/branch"},
+		},
 		RunCLI: runSessionKey,
 	})
 }

@@ -1545,6 +1545,43 @@ values differ, the launch is refused.
 	after the pair is gone; the second waits up to a minute and then fails naming
 	the lock.
 
+	*Units.* A session's pair is two transient user units,
+	*spinclass-keyholder-fibby-<hash>.service* (fibby, the virtual card) and
+	*spinclass-keyholder-agent-<hash>.service* (the holder agent), where *<hash>*
+	is the first eight bytes of the SHA-256 of the session key, in hex (sixteen
+	characters). List them with *systemctl --user list-units --all
+	'spinclass-keyholder-\*'*; read one's output with *journalctl --user -u
+	spinclass-keyholder-agent-<hash>.service*. The hash is also the name of the
+	session's directory under *$XDG_STATE_HOME/spinclass/keyholder/* (mode 0700,
+	holding the fibby and agent sockets, a work directory, the *record.json* that
+	names the units and the minted public key and fingerprint, and the *cert/*
+	directory), and of the *<hash>.lock* file beside it. *sc keyholder-stop --all
+	--dry-run* maps hashes to sessions. The units are started with *systemd-run
+	--user* by absolute store path; spinclass never looks *systemd-run*,
+	*systemctl*, *ssh-add* or *ssh-keygen* up on PATH (spinclass-build-pins(7)).
+
+	*Logs.* The launcher writes to *spinclass/lifecycle.log* under
+	*$XDG_LOG_HOME* (default *~/.local/log*), one line each, prefixed
+	*keyholder:*: *started a pair for <session> (<fingerprint>)* when a pair is
+	made and its key minted; *the pair for <session> is gone (a unit is not
+	running): tearing it down and minting a NEW key* and *the key of <session>
+	CHANGED: old <fingerprint>, new <fingerprint>: any certificate for the old key
+	is void* when a lost pair is replaced (the same notice goes to the session's
+	holders and its spawner, at most once per ten minutes per session, and shows
+	in *sc list* and *session-health*); *clearing leftovers of an unfinished
+	start for <session>* after a launch that died half way; *stopped the pair for
+	<session>* when a session's pair is stopped, and *stopped the pair <hash>
+	(<session>)* for one swept by *sc clean* or *sc keyholder-stop*.
+
+	*A changed key.* A pair that is lost (the units gone after a reboot or a
+	stop, the holder restarted) mints a NEW key: keys live only in fibby's memory
+	and are never written down. Every certificate for the old key is void; *sc
+	session-key SESSION* shows the new key and *sc list* shows *RE-MINTED* until a
+	certificate for it is installed. *sc session-key* itself refuses to print a key
+	other than the one recorded at the mint, so a key replaced behind the pair's
+	back is never certified unnoticed; the answer is to stop the pair and start it
+	again.
+
 ## [host-queue]
 
 Host-wide gate policy (#424,

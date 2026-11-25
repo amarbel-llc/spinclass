@@ -212,6 +212,13 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `cmd/spinclass/grit*_cmd.go`): the nine `grit_*` MCP tools, their
   ownership-based verdicts, agentless remote lane and the `sc grit` escape
   hatch: `spinclass-grit(7)`; `[store]` identity: `spinclass-sweatfile(5)`.
+- **Per-session key holder** (`docs/plans/2026-11-25-key-holder.md`;
+  `internal/0/keyholder`, `cmd/spinclass/keyholder_*.go`, `session_key_cmd.go`):
+  trusted `[keyholder] mode` (off by default), `fibby`/`piggy` store paths;
+  every worker gets its own fibby + holder pair as user units and its
+  `SSH_AUTH_SOCK`; a driver keeps his agent. `sc session-key`,
+  `sc keyholder-stop --all`; units, logs and recovery: `[keyholder]` in
+  `spinclass-sweatfile(5)`; the four tool pins: `spinclass-build-pins(7)`.
 
 ## Sweatfile config
 
