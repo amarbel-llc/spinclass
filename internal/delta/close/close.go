@@ -275,6 +275,10 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	if err := stopConfinedUnit(tw, wtPath, branch, force); err != nil {
 		return err
 	}
+	// The session's key holder pair goes with it, whatever [keyholder] says now.
+	if err := stopSessionKeyholder(tw, activeKey(repoPath, branch), branch, force); err != nil {
+		return err
+	}
 
 	// Revoke the session's forge push credential (FDR 0028) while the
 	// worktree — its credential file and sweatfile — still exists. Non-fatal:
@@ -400,6 +404,9 @@ func closeVanished(tw *tap.Writer, repoPath, wtPath, branch string, force bool) 
 
 	signalSessionProcess(tw, repoPath, branch)
 	if err := stopConfinedUnit(tw, wtPath, branch, force); err != nil {
+		return err
+	}
+	if err := stopSessionKeyholder(tw, activeKey(repoPath, branch), branch, force); err != nil {
 		return err
 	}
 	revokeCredential(tw, repoPath, wtPath, branch, activeKey(repoPath, branch))

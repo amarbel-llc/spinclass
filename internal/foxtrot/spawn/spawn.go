@@ -266,6 +266,14 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	// resume`, so it goes into the spawn env and the pinned resume env alike.
 	pinned := shop.PinEntry(merged)
 	sessionEnv = setUnattendedMarker(sessionEnv, unattended)
+	if KeyholderEnv != nil {
+		kh, err := KeyholderEnv(home, repoPath, rp.SessionKey)
+		if err != nil {
+			undoOnFailure()
+			return Pending{}, err
+		}
+		sessionEnv = withKeyholderEnv(sessionEnv, kh)
+	}
 	pinned.Env = setUnattendedMarker(pinned.Env, unattended)
 	pinned.Posture = pinnedPostureOf(unattended)
 	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, dotenv, resolved, authorizingGrant, narrowing, pinned, confine)

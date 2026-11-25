@@ -604,10 +604,14 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 
 	merged := hierarchy.Merged
 	entry := startEntry(resolvedPath, merged, os.Stderr)
+	kh, err := keyholderSessionEnv(os.Getenv("HOME"), repoPath, resolvedPath.SessionKey, os.Stderr)
+	if err != nil {
+		return err
+	}
 	exec := executor.SessionExecutor{
 		Entrypoint:  entry.Start,
 		Description: resolvedPath.Description,
-		Env:         entry.Env,
+		Env:         withKeyholderEnv(entry.Env, kh),
 	}
 
 	return attachSessionFn(
@@ -838,6 +842,11 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	}
 
 	env := withEnvPairs(withEnvPairs(entry.Env, dotenv), profileEnv)
+	kh, err := keyholderSessionEnv(os.Getenv("HOME"), state.RepoPath, state.SessionKey, os.Stderr)
+	if err != nil {
+		return err
+	}
+	env = withKeyholderEnv(env, kh)
 	if scopeSpec != "" {
 		// Applied last so nothing configured can name another spec.
 		env = withScope(env, scopeSpec)
