@@ -133,8 +133,11 @@ type layout struct {
 	fibbyUnit, agentUnit             string
 }
 
-func (l *Launcher) layoutFor(sessionKey string) layout {
-	h := Hash(sessionKey)
+func (l *Launcher) layoutFor(sessionKey string) layout { return l.layoutForHash(Hash(sessionKey)) }
+
+// layoutForHash is layoutFor for a pair found by its hash alone (a sweep finds
+// directories and units whose session key is not known).
+func (l *Launcher) layoutForHash(h string) layout {
 	dir := filepath.Join(l.Base, h)
 	return layout{
 		dir:       dir,

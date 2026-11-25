@@ -17,9 +17,9 @@ var lockWait = 60 * time.Second
 // LockPath is the session's lock file. It sits in the keyholder root beside the
 // session's directory, never inside it: Stop removes that directory, and a lock
 // that lived in it would vanish under whoever held it.
-func LockPath(base, sessionKey string) string {
-	return filepath.Join(base, Hash(sessionKey)+".lock")
-}
+func LockPath(base, sessionKey string) string { return lockPathHash(base, Hash(sessionKey)) }
+
+func lockPathHash(base, hash string) string { return filepath.Join(base, hash+".lock") }
 
 // lockSession takes the session's exclusive flock and returns its release. Two
 // launches of one session (a resume in two terminals, a resume racing a spawn
@@ -28,13 +28,19 @@ func LockPath(base, sessionKey string) string {
 // A flock belongs to the open file description, so two goroutines of one
 // process exclude each other too.
 func (l *Launcher) lockSession(ctx context.Context, sessionKey string) (func(), error) {
+	return l.lockHash(ctx, Hash(sessionKey), sessionKey)
+}
+
+// lockHash is lockSession for a pair known by its hash; name is what the
+// message calls it.
+func (l *Launcher) lockHash(ctx context.Context, hash, name string) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(l.Base), 0o700); err != nil {
 		return nil, fmt.Errorf("keyholder: %w", err)
 	}
 	if err := mkdirExact0700(l.Base); err != nil {
 		return nil, fmt.Errorf("keyholder: %w", err)
 	}
-	path := LockPath(l.Base, sessionKey)
+	path := lockPathHash(l.Base, hash)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("keyholder: opening the session lock %s: %w", path, err)
@@ -51,7 +57,7 @@ func (l *Launcher) lockSession(ctx context.Context, sessionKey string) (func(), 
 		}
 		if ctx.Err() != nil || time.Now().After(deadline) {
 			_ = f.Close()
-			return nil, fmt.Errorf("keyholder: another start or stop of %s holds %s: try again once it has finished", sessionKey, path)
+			return nil, fmt.Errorf("keyholder: another start or stop of %s holds %s: try again once it has finished", name, path)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

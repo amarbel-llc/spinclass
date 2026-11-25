@@ -58,6 +58,23 @@ func (r SystemdRunner) Active(ctx context.Context, unit string) (bool, error) {
 	return false, fmt.Errorf("systemctl is-active %s: %w", unit, err)
 }
 
+// ListUnits returns the loaded key holder units, in any state, by name.
+func (r SystemdRunner) ListUnits(ctx context.Context) ([]string, error) {
+	ctx, cancel := r.ctx(ctx)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", "--user", "list-units", "--all", "--plain", "--no-legend", "--no-pager", "spinclass-keyholder-*").Output()
+	if err != nil {
+		return nil, fmt.Errorf("systemctl list-units: %w", err)
+	}
+	var units []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if f := strings.Fields(line); len(f) > 0 && strings.HasSuffix(f[0], ".service") {
+			units = append(units, f[0])
+		}
+	}
+	return units, nil
+}
+
 // Stop stops the unit. A unit that is not loaded is already stopped.
 func (r SystemdRunner) Stop(ctx context.Context, unit string) error {
 	ctx, cancel := r.ctx(ctx)
