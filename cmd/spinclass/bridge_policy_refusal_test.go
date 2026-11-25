@@ -89,7 +89,7 @@ func TestPolicyRefusalOfPostureRulesCarriesBridgeText(t *testing.T) {
 	f := newLiarFixture(t)
 	a := f.a.record(t)
 	ask := func(posture string) error {
-		_, err := queueRestartFresh(a, f.a.principal, f.a.principal, "r", false, posture, false)
+		_, err := queueRestartPosture(a, f.a.principal, f.a.principal, "r", false, posture)
 		return err
 	}
 	bridged := bridgedCtxFor(f.a.key)

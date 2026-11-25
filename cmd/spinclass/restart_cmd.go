@@ -344,6 +344,10 @@ type restartThisSessionParams struct {
 	Reason  string `json:"reason"`
 	Force   bool   `json:"force"`
 	Posture string `json:"posture"`
+	// FreshEnv is not offered by this build's tool schema; it is decoded only so
+	// a bridged call that names it is refused, as the bridge contract says
+	// (bridgeRestartEscalationRefusal). It has no effect outside the bridge.
+	FreshEnv bool `json:"fresh_env"`
 }
 
 // rejectForceFor fails closed on any force argument, including false: the tool
