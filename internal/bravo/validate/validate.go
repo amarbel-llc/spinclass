@@ -971,6 +971,35 @@ func CheckKeyholder(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckKeyholderEffective reports the key holder as a launch would see it: the
+// effective mode across every layer above the repo (the last one that sets it
+// wins), always as one line "key holder: on" or "key holder: off", and, when it
+// is on, an error for each of fibby and piggy that is unset or no store program
+// could satisfy. The per-layer CheckKeyholder cannot see this: a layer that
+// sets the mode and a layer that writes the paths are often not the same, and
+// "on" with a path unset refuses every start, resume and spawn.
+func CheckKeyholderEffective(h sweatfile.Hierarchy, home, repoRoot string) []Issue {
+	on, _, err := sweatfileio.TrustedKeyholderMode(h, home, repoRoot)
+	if err != nil {
+		return []Issue{{Message: err.Error(), Severity: SeverityError, Field: "keyholder.mode"}}
+	}
+	if !on {
+		return []Issue{{Message: "key holder: off (no layer above the repo sets [keyholder] mode = \"on\"; sessions run on the operator's agent)", Severity: SeverityWarning, Field: "keyholder"}}
+	}
+	issues := []Issue{{Message: "key holder: on (a launch of a session spinclass starts needs both fibby and piggy below)", Severity: SeverityWarning, Field: "keyholder"}}
+	fibby, piggy, _ := sweatfileio.TrustedKeyholderTools(h, home, repoRoot)
+	for _, p := range []struct{ name, path string }{{"fibby", fibby}, {"piggy", piggy}} {
+		if err := sweatfileio.CheckKeyholderToolPath(p.name, p.path); err != nil {
+			issues = append(issues, Issue{
+				Message:  err.Error() + ": every start, resume and spawn is refused until it is fixed (the host's configuration writes it; set mode \"off\" to turn the key holder off)",
+				Severity: SeverityError,
+				Field:    "keyholder." + p.name,
+			})
+		}
+	}
+	return issues
+}
+
 // CheckHostQueueValues reports a [host-queue] value the queue cannot use (#424
 // step 4): a size, duration or bound hostqueue.ConfigFrom refuses. The layer is
 // judged on its own over the defaults, whatever enable says, so a bad value is
@@ -1748,6 +1777,17 @@ func Run(w io.Writer, home, repoDir string) int {
 	}
 	sub.Plan()
 	tw.EndSubtest("merged result", sub)
+
+	khSub := tw.Subtest("key holder")
+	for _, iss := range CheckKeyholderEffective(result, home, mainRoot) {
+		if iss.Severity == SeverityError {
+			khSub.NotOk(iss.Field, map[string]string{"severity": iss.Severity, "message": iss.Message})
+		} else {
+			khSub.Ok(iss.Message)
+		}
+	}
+	khSub.Plan()
+	tw.EndSubtest("key holder", khSub)
 
 	applySub := tw.Subtest("apply (dry-run)")
 	merged := sweatfile.GetDefault().MergeWith(result.Merged)

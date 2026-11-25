@@ -1,11 +1,77 @@
 package validate
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
+
+// keyholderRun validates a hierarchy whose only layer is the global sweatfile
+// with the given body and returns the TAP output and the exit code.
+func keyholderRun(t *testing.T, body string) (string, int) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	repoDir := filepath.Join(home, "eng", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSweatfile(t, filepath.Join(home, ".config", "spinclass", "sweatfile"), body)
+	var buf bytes.Buffer
+	code := Run(&buf, home, repoDir)
+	return buf.String(), code
+}
+
+// A host with the mode on and no fibby or piggy refuses every start, resume and
+// spawn, and the per-layer check cannot see that: validate must fail on it,
+// naming the key and where it comes from.
+func TestRunFailsWhenTheKeyHolderIsOnWithoutItsPrograms(t *testing.T) {
+	out, code := keyholderRun(t, "[keyholder]\nmode = \"on\"\n")
+	if code == 0 {
+		t.Errorf("exit 0 for mode on with fibby and piggy unset:\n%s", out)
+	}
+	for _, want := range []string{"keyholder.fibby", "[keyholder] fibby is not set", "keyholder.piggy", "the host's configuration writes"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// The effective mode is always printed, off included, so a host whose trusted
+// file is missing does not look like a healthy one.
+func TestRunPrintsTheEffectiveKeyHolderMode(t *testing.T) {
+	out, code := keyholderRun(t, "")
+	if code != 0 || !strings.Contains(out, "key holder: off") {
+		t.Errorf("no sweatfile: exit %d, want 0 and the line 'key holder: off':\n%s", code, out)
+	}
+	out, _ = keyholderRun(t, "[keyholder]\nmode = \"on\"\n")
+	if !strings.Contains(out, "key holder: on") {
+		t.Errorf("mode on: want the line 'key holder: on':\n%s", out)
+	}
+}
+
+// Both paths valid: mode on is clean.
+func TestRunAcceptsTheKeyHolderOnWithBothPrograms(t *testing.T) {
+	store := t.TempDir()
+	prev := sweatfileio.KeyholderStoreRoot
+	sweatfileio.KeyholderStoreRoot = store
+	t.Cleanup(func() { sweatfileio.KeyholderStoreRoot = prev })
+	fibby, piggy := filepath.Join(store, "fibby"), filepath.Join(store, "piggy")
+	for _, p := range []string{fibby, piggy} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, code := keyholderRun(t, "[keyholder]\nmode = \"on\"\nfibby = \""+fibby+"\"\npiggy = \""+piggy+"\"\n")
+	if code != 0 || strings.Contains(out, "not ok") {
+		t.Errorf("mode on with both programs: exit %d:\n%s", code, out)
+	}
+}
 
 // [keyholder] is the operator's switch: a repo-level table warns once and a
 // trusted one does not; an invalid mode is an error wherever it is.
