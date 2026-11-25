@@ -926,15 +926,39 @@ func CheckHostQueue(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 
 // CheckKeyholder reports on [keyholder]: a repo-level table warns once (the
 // switch is the operator's, read only above the repo, so it is ignored there),
-// and an invalid mode is an error in any layer.
+// an invalid mode is an error in any layer, and a fibby or piggy path no store
+// program could satisfy (sweatfileio.CheckKeyholderToolPath) is an error when
+// this layer sets mode "on" and a warning otherwise: before the switch is on
+// nothing launches, after it every launch would be refused. A repo-level path is
+// ignored anyway, so it is left to the one repo-level warning.
 func CheckKeyholder(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	if sf.Keyholder == nil {
 		return nil
 	}
 	var issues []Issue
+	modeOn := false
 	if sf.Keyholder.Mode != nil {
-		if _, err := sweatfileio.ParseKeyholderMode(*sf.Keyholder.Mode); err != nil {
+		on, err := sweatfileio.ParseKeyholderMode(*sf.Keyholder.Mode)
+		if err != nil {
 			issues = append(issues, Issue{Message: err.Error(), Severity: SeverityError, Field: "keyholder.mode"})
+		}
+		modeOn = on
+	}
+	if layerAboveRepo {
+		severity := SeverityWarning
+		if modeOn {
+			severity = SeverityError
+		}
+		for _, p := range []struct {
+			name string
+			path *string
+		}{{"fibby", sf.Keyholder.Fibby}, {"piggy", sf.Keyholder.Piggy}} {
+			if p.path == nil {
+				continue
+			}
+			if err := sweatfileio.CheckKeyholderToolPath(p.name, *p.path); err != nil {
+				issues = append(issues, Issue{Message: err.Error(), Severity: severity, Field: "keyholder." + p.name})
+			}
 		}
 	}
 	if !layerAboveRepo {

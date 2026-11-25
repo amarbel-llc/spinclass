@@ -1451,11 +1451,26 @@ because the switch changes what a session can sign with and is the operator's.
 	sessions. *sc session-key SESSION* prints the session's public key and
 	fingerprint. Any other value is an error and leaves the key holder off.
 
-	The programs the pair runs are pinned into the build as absolute store
-	paths; an unpinned build refuses to start a pair and never looks a name up on
-	PATH.
+*fibby*, *piggy*
+	The absolute store paths of the two programs the pair runs, for example
+	*/nix/store/...-fibby-holder-0.1.0/bin/fibby* and
+	*/nix/store/...-piggy-0.1.23/bin/piggy*. *The host's configuration writes
+	them, not a person by hand,* from the one piggy the host runs as its agent, so
+	the holder and the agent never disagree on a version. spinclass pins no piggy
+	of its own and never looks either program up on PATH: the pair holds a
+	session's key and runs outside the unit, and a name resolved from a PATH a
+	session can influence is the hole. Last layer above the repo that sets each
+	wins; a repo or worktree layer's value is ignored and reported.
 
-	With *"on"* a worker's environment loses every variable that names the
+	With *mode* *"on"*, each path must be set, absolute, clean, under */nix/store*,
+	and (after following links, which must stay under the store) an executable
+	regular file; otherwise the session launch is refused, naming the setting. A
+	session is never launched on the operator's agent instead. With *mode*
+	*"off"* the paths are read and never checked at launch; *sc validate* warns
+	about a path no store program could satisfy (an error when the same layer
+	sets *mode* to *"on"*).
+
+	With *mode* *"on"* a worker's environment loses every variable that names the
 	operator's agent: *SSH_AUTH_SOCK* is replaced by the holder's socket, and
 	*PIGGY_AUTH_SOCK*, *PIVY_AUTH_SOCK*, *SSH_AGENT_PID*, *GPG_AGENT_INFO* and any
 	*SSH_ASKPASS\** (including *SSH_ASKPASS_REQUIRE*) are set to the empty string,
@@ -1469,8 +1484,9 @@ because the switch changes what a session can sign with and is the operator's.
 	*$XDG_RUNTIME_DIR/piggy-agent.sock*, *~/.local/state/ssh/\*.sock*, a
 	forwarded agent under */tmp/ssh-\**, or *$XDG_RUNTIME_DIR/gnupg*). The
 	switch removes the pointers and the habit. Withholding the sockets is the
-	confined unit's job, and until the confined spec stops binding the
-	operator's agent (the key holder's item B) a confined unit still receives it.
+	confined unit's job: with the switch on, a confined unit's spec binds only the
+	session's holder socket (never the operator's agent) and refuses the launch
+	when there is no live holder socket.
 
 ## [host-queue]
 
