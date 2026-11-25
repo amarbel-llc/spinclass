@@ -26,6 +26,13 @@ const sessionTestKey = "bridge-test/session-key"
 // check admits everyone: the unit check is the listener's own tested concern.
 func startSessionBridge(t *testing.T) (sock string, srv *bridgeserver.Server) {
 	t.Helper()
+	return startSessionBridgeWith(t, nil, nil)
+}
+
+// startSessionBridgeWith is startSessionBridge with a crossing recorder for the
+// session handler and an observer for the listener.
+func startSessionBridgeWith(t *testing.T, rec crossingRecorder, obs bridgeserver.Observer) (sock string, srv *bridgeserver.Server) {
+	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", "the-serve-principal")
@@ -34,7 +41,8 @@ func startSessionBridge(t *testing.T) (sock string, srv *bridgeserver.Server) {
 	dir := shortBridgeDir(t)
 	srv, err := bridgeserver.Listen(dir, "agent.service", bridgeserver.Options{
 		SessionKey: sessionTestKey,
-		Handler:    newBridgeSessionHandler(reg, "spinclass", "test"),
+		Handler:    newBridgeSessionHandler(reg, "spinclass", "test", rec),
+		Observer:   obs,
 		PeerCheck:  func(net.Conn, string) error { return nil },
 	})
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/bravo/sysprompt"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"code.linenisgreat.com/spinclass/internal/resources"
@@ -156,7 +157,9 @@ func registerServeCommand(app *command.App) {
 
 			// Bridge listener (bridge contract v1): off unless clown exported
 			// the directory and unit and a trusted [bridge] enable is set.
-			if stopBridge := startBridge(sigCtx, newBridgeSessionHandler(registry, app.Name, app.Version)); stopBridge != nil {
+			if stopBridge := startBridge(sigCtx, func(rec crossingRecorder) bridgeserver.SessionHandler {
+				return newBridgeSessionHandler(registry, app.Name, app.Version, rec)
+			}); stopBridge != nil {
 				defer stopBridge()
 			}
 

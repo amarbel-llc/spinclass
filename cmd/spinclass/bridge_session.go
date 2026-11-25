@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
@@ -13,6 +14,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/transport"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
+	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
@@ -47,9 +49,16 @@ type bridgeSessionHandler struct {
 	version string
 }
 
-// newBridgeSessionHandler serves the seven session tools out of registry.
-func newBridgeSessionHandler(registry *server.ToolRegistryV1, name, version string) bridgeserver.SessionHandler {
-	return &bridgeSessionHandler{tools: bridgeSessionProvider{registry: registry}, name: name, version: version}
+// crossingRecorder is where a served call is recorded (the crossing log). Nil
+// records nothing.
+type crossingRecorder interface {
+	Record(crossinglog.Crossing)
+}
+
+// newBridgeSessionHandler serves the seven session tools out of registry and
+// records each tools/call in rec.
+func newBridgeSessionHandler(registry *server.ToolRegistryV1, name, version string, rec crossingRecorder) bridgeserver.SessionHandler {
+	return &bridgeSessionHandler{tools: bridgeSessionProvider{registry: registry, rec: rec}, name: name, version: version}
 }
 
 // Serve runs one MCP server over conn until the peer ends the stream or ctx
@@ -63,10 +72,12 @@ func (h *bridgeSessionHandler) Serve(ctx context.Context, conn net.Conn, caller 
 	// The listener closes conn after Serve returns, so the transport has no
 	// closer of its own.
 	t := bridgeErrorCodes{Transport: transport.NewStdio(conn, conn)}
+	tools := h.tools
+	tools.session = caller.SessionKey
 	srv, err := server.New(t, server.Options{
 		ServerName:    h.name,
 		ServerVersion: h.version,
-		Tools:         h.tools,
+		Tools:         tools,
 	})
 	if err != nil {
 		return
@@ -77,6 +88,8 @@ func (h *bridgeSessionHandler) Serve(ctx context.Context, conn net.Conn, caller 
 // bridgeSessionProvider is the registry restricted to the session tools.
 type bridgeSessionProvider struct {
 	registry *server.ToolRegistryV1
+	rec      crossingRecorder
+	session  string
 }
 
 func (p bridgeSessionProvider) allowed(name string) bool {
@@ -125,6 +138,17 @@ func (p bridgeSessionProvider) ListToolsV1(ctx context.Context, cursor string) (
 }
 
 func (p bridgeSessionProvider) CallTool(ctx context.Context, name string, args json.RawMessage) (*protocol.ToolCallResult, error) {
+	started := time.Now()
+	res, err := p.callTool(ctx, name, args)
+	var isErr bool
+	if res != nil {
+		isErr = res.IsError
+	}
+	p.record(name, args, started, res, isErr, err)
+	return res, err
+}
+
+func (p bridgeSessionProvider) callTool(ctx context.Context, name string, args json.RawMessage) (*protocol.ToolCallResult, error) {
 	if !p.allowed(name) {
 		return nil, errors.New(unknownToolPrefix + name)
 	}
@@ -139,6 +163,17 @@ func (p bridgeSessionProvider) CallTool(ctx context.Context, name string, args j
 }
 
 func (p bridgeSessionProvider) CallToolV1(ctx context.Context, name string, args json.RawMessage) (*protocol.ToolCallResultV1, error) {
+	started := time.Now()
+	res, err := p.callToolV1(ctx, name, args)
+	var isErr bool
+	if res != nil {
+		isErr = res.IsError
+	}
+	p.record(name, args, started, res, isErr, err)
+	return res, err
+}
+
+func (p bridgeSessionProvider) callToolV1(ctx context.Context, name string, args json.RawMessage) (*protocol.ToolCallResultV1, error) {
 	if !p.allowed(name) {
 		return nil, errors.New(unknownToolPrefix + name)
 	}
@@ -150,6 +185,49 @@ func (p bridgeSessionProvider) CallToolV1(ctx context.Context, name string, args
 		return nil, errors.New(res.Content[0].Text)
 	}
 	return res, nil
+}
+
+// record writes the crossing-log line of one tools/call. The verb is the tool
+// name only when it is one of the seven, so a request's own text never names a
+// line; the outcome follows the JSON-RPC result (a refusal is -32001, any
+// other error or an isError result is "error"). The log redacts the arguments
+// itself; nothing here is written that the log would not. A nil recorder
+// records nothing, and the recorder never fails the call.
+func (p bridgeSessionProvider) record(name string, args json.RawMessage, started time.Time, res any, isErr bool, err error) {
+	if p.rec == nil {
+		return
+	}
+	verb := "unknown"
+	if p.allowed(name) {
+		verb = name
+	}
+	outcome := crossinglog.OutcomeOK
+	resp := 0
+	switch {
+	case err != nil:
+		outcome = crossinglog.OutcomeError
+		if strings.HasPrefix(err.Error(), bridgeRefusalPrefix) {
+			outcome = crossinglog.OutcomeRefused
+		}
+		resp = len(err.Error())
+	case isErr:
+		outcome = crossinglog.OutcomeError
+	}
+	if err == nil && res != nil {
+		if b, merr := json.Marshal(res); merr == nil {
+			resp = len(b)
+		}
+	}
+	p.rec.Record(crossinglog.Crossing{
+		Session:   p.session,
+		Service:   bridgeserver.ServiceSession,
+		Verb:      verb,
+		Outcome:   outcome,
+		Duration:  time.Since(started),
+		ReqBytes:  len(args),
+		RespBytes: resp,
+		Args:      args,
+	})
 }
 
 // bridgeArgs gives a call that sent no arguments the empty object, which is

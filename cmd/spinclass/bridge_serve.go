@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
+	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 
@@ -64,7 +67,7 @@ var bridgeResolve = func() bridgePlan {
 // startBridge starts the bridge listener when the plan allows it and returns
 // what stops it; nil when serve runs without it, with the reason in the serve
 // log. sessionHandler serves the session service. It never fails serve.
-func startBridge(ctx context.Context, sessionHandler bridgeserver.SessionHandler) (stop func()) {
+func startBridge(ctx context.Context, newHandler func(rec crossingRecorder) bridgeserver.SessionHandler) (stop func()) {
 	plan := bridgeResolve()
 	if plan.Dir == "" {
 		servelog.Infof("serve.bridge off: %s", plan.Reason)
@@ -75,7 +78,29 @@ func startBridge(ctx context.Context, sessionHandler bridgeserver.SessionHandler
 		servelog.Errorf("serve.bridge off: session key unresolved: %v", err)
 		return nil
 	}
-	return startBridgeFrom(ctx, plan, bridgeserver.Options{SessionKey: key, Handler: sessionHandler, Logf: servelog.Errorf})
+	log := openBridgeCrossingLog()
+	return startBridgeFrom(ctx, plan, bridgeserver.Options{
+		SessionKey: key,
+		Handler:    newHandler(log),
+		Observer:   &bridgeObserver{log: log},
+		Logf:       servelog.Errorf,
+	})
+}
+
+// openBridgeCrossingLog opens this principal's crossing log under
+// <state>/spinclass/bridge. A state directory that cannot be resolved gives a
+// nil log, which records nothing; the bridge still starts.
+func openBridgeCrossingLog() *crossinglog.Log {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		servelog.Errorf("serve.bridge crossing log off: %v", err)
+		return nil
+	}
+	return crossinglog.Open(crossinglog.Options{
+		Dir:       filepath.Join(stateDir, "spinclass", "bridge"),
+		Principal: currentPrincipal(),
+		Logf:      servelog.Errorf,
+	})
 }
 
 // startBridgeFrom listens per the plan with opts and serves until the

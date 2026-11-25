@@ -86,6 +86,40 @@ stream, no reply within the timeout) it MUST fail the call at once with
 `clown: the bridge is down (<reason>); no tool or model call can leave this session; the session's frontend is gone or restarting`
 and MUST NOT retry silently or fall back to a direct path.
 
+## Crossing log
+
+The frontend MUST keep a log with one NDJSON line per crossing, at
+`<state>/spinclass/bridge/<principal>.ndjson` (the directory mode 0700, the file
+0600, created by the frontend; the session's unit has no access to it). A line
+has the fields `ts` (RFC 3339 with nanoseconds, UTC), `session`, `service`,
+`verb`, `outcome`, `duration_ms`, `req_bytes`, `resp_bytes`, `arg_names` and
+`args_sha256`, and MAY have `fields`. `outcome` is one of `ok`, `refused`,
+`error`, `busy`, `hello-timeout`; a hello answered `ERR unknown-service` is
+logged as `refused` and one answered `ERR version` as `error`. `service` is one
+of the reserved labels or `unknown`. A call on the `session` service is one
+line whose `verb` is the tool name (`unknown` for a tool the service does not
+list) and whose outcome follows the JSON-RPC result: `ok`, `refused` when the
+error code is -32001, `error` otherwise. A hello that did not become a stream
+is one line with verb `hello`; a served `control` stream is one line with verb
+`stream`.
+
+Redaction (normative): argument VALUES MUST NOT be logged. A line carries
+`arg_names`, the argument names sorted (an empty list for none), and
+`args_sha256`, the first 16 hex characters of the sha256 of the arguments'
+canonical JSON (keys sorted, no insignificant whitespace; the raw bytes when the
+arguments are not valid JSON). A per-verb allow-list (`SafeFields`) may add
+`fields`: a map of argument name to value for the names `session`, `branch` and
+`target` only, each logged only if it is a string of at most 128 characters
+matching `[A-Za-z0-9._/-]+`, otherwise dropped. Nothing from free text
+(descriptions, messages, commands, reasons) is ever logged, and no attacker
+text reaches `service` or `verb`.
+
+Retention: when a write would take the file past 4 MiB it is renamed to
+`<principal>.ndjson.1` (older generations shift up; at most three are kept, `.1`
+to `.3`), and log files older than 14 days are deleted when the log opens. A
+failed log write MUST NOT fail or delay a crossing; it is counted and logged at
+most once a minute.
+
 ## Vectors file and its digest
 
 `internal/0/bridge/testdata/vectors.json` is a JSON array of cases with an `op`:
