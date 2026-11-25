@@ -97,6 +97,20 @@ value from the request.
 | `cancel-restart` | With no `child`, cancels this session's own queued restart: allowed. Naming a child: `refused: cancel-restart naming another session needs the right "restart" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)` |
 | `close-this-session` | Allowed on the session itself. Without the trusted setting: `refused: close-this-session needs the trusted [permissions].allow-self-close = true; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
 
+The always-ask floor (`perms.AlwaysAsk`) lives only in the hook that runs inside
+the unit, so a forced or widening act never rests on it over the bridge. The
+verbs refuse the escalation arguments themselves, whatever their value:
+
+| Verb and argument | Over the bridge |
+| --- | --- |
+| `restart-this-session` with `force`, `fresh_env` or any `posture` (`keep` included) | `refused: restart-this-session with force, fresh_env or posture is not available to a session inside its unit; a holder with the right "restart" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force, --fresh-env or --posture (--force is always asked of the human)`. Nothing is recorded and no hand-off runs. |
+| `close-this-session` with `force` (any value) | `refused: close-this-session takes no force argument and never discards work; the operator at a terminal outside the unit discards work with `sc close --force <session>`` |
+
+The other bridged verbs have no escalation argument: `whoami` takes none,
+`list-handles` has `accept` (refused above) and `cancel-restart` has `child`
+(refused above); `reason` of a restart is free text that reaches the hand-off as
+one argv element, never a shell.
+
 A session verb refused for any other reason (a running job, a missing session,
 an obstacle to a restart or close that is not a missing setting) is a tool
 result with `isError`, not a refusal. A call to a tool outside the five

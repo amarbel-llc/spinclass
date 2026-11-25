@@ -47,19 +47,19 @@ func TestE2EToolMetricsCountAndTimeEachOutcome(t *testing.T) {
 	if rep := p.call("tools/call", map[string]any{"name": "cancel-restart", "arguments": map[string]any{"child": "someone/else"}}); rep.Error == nil || rep.Error.Code != -32001 {
 		t.Fatalf("cancel-restart naming a child: %+v", rep.Error)
 	}
-	// error: a tool result with isError that is not a refusal (close-this-session
-	// takes no force argument).
-	rep := p.call("tools/call", map[string]any{"name": "close-this-session", "arguments": map[string]any{"force": false}})
+	// error: a tool result with isError that is not a refusal (arguments that
+	// do not parse are not a rule saying no).
+	rep := p.call("tools/call", map[string]any{"name": "restart-this-session", "arguments": map[string]any{"reason": 5}})
 	if text, isErr := p.toolText(rep); !isErr || strings.HasPrefix(text, "refused: ") {
-		t.Fatalf("close-this-session with force: %v %q", isErr, text)
+		t.Fatalf("restart-this-session with a malformed reason: %v %q", isErr, text)
 	}
 
 	b.waitMetric(
 		"spinclass.bridge.session.tool.whoami.ok:1|c",
 		"spinclass.bridge.session.tool.cancel_restart.refused:1|c",
-		"spinclass.bridge.session.tool.close_this_session.error:1|c",
+		"spinclass.bridge.session.tool.restart_this_session.error:1|c",
 	)
-	for _, tool := range []string{"whoami", "cancel_restart", "close_this_session"} {
+	for _, tool := range []string{"whoami", "cancel_restart", "restart_this_session"} {
 		b.waitMetricShaped("spinclass.bridge.session.tool."+tool+".duration_ms:", "|ms")
 	}
 }

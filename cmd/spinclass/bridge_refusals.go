@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
@@ -18,6 +19,27 @@ const (
 	bridgeRestartSelfRefusal = bridgeRefusalPrefix + "restart-this-session needs the trusted [session-entry].restart hand-off; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)"
 	bridgeCloseSelfRefusal   = bridgeRefusalPrefix + "close-this-session needs the trusted [permissions].allow-self-close = true; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)"
 )
+
+// The always-ask floor lives only in the hook that runs inside the unit, so a
+// forced or widening act never rests on it over the bridge: the verb refuses the
+// escalation arguments itself and names who can do the thing (a holder with the
+// right, or the operator, both outside the unit).
+const (
+	bridgeRestartEscalationRefusal = bridgeRefusalPrefix + "restart-this-session with force, fresh_env or posture is not available to a session inside its unit; a holder with the right \"restart\" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force, --fresh-env or --posture (--force is always asked of the human)"
+	bridgeCloseForceRefusal        = bridgeRefusalPrefix + "close-this-session takes no force argument and never discards work; the operator at a terminal outside the unit discards work with `sc close --force <session>`"
+)
+
+// argPresent says whether the JSON object args names key at all, whatever its
+// value; arguments that do not parse name nothing (the verb's own parse reports
+// them).
+func argPresent(args json.RawMessage, key string) bool {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(args, &raw) != nil {
+		return false
+	}
+	_, ok := raw[key]
+	return ok
+}
 
 // bridgeSessionRefusals is the refusal of each gated session verb, keyed by the
 // tool label its gate passes to refuseConfinedServeCaller.

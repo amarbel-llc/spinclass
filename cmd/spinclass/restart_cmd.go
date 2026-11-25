@@ -373,6 +373,9 @@ func handleRestartThisSession(ctx context.Context, args json.RawMessage, _ comma
 			return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
+	if bridgedCall(ctx) && (p.Force || p.FreshEnv || p.Posture != "") {
+		return command.TextErrorResult(bridgeRestartEscalationRefusal), nil
+	}
 	text, err := runRestartThisSessionFor(ctx, p)
 	if err != nil {
 		return bridgeSettingRefusal(ctx, err, settingRestartHandoff, bridgeRestartSelfRefusal), nil

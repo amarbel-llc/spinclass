@@ -199,6 +199,9 @@ func closeCallerSession(ctx context.Context) (principal string, st *session.Stat
 // bridge, the refusal for want of allow-self-close is in the contract's text
 // (bridgeCloseSelfRefusal); every other outcome is unchanged.
 func handleCloseThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if bridgedCall(ctx) && argPresent(args, "force") {
+		return command.TextErrorResult(bridgeCloseForceRefusal), nil
+	}
 	text, err := runCloseThisSession(ctx, args)
 	if err != nil {
 		return bridgeSettingRefusal(ctx, err, settingAllowSelfClose, bridgeCloseSelfRefusal), nil
