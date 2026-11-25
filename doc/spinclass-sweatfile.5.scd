@@ -1776,6 +1776,20 @@ holder against the operator's off cannot be started.
 	operator blessing) is tracked as spinclass#520 and written up in
 	docs/plans/2026-11-25-key-holder.md.
 
+## [bridge]
+
+The per-session bridge listener inside *serve*
+(docs/plans/2026-11-25-bridge-wire-v1.md). Not merged: read only from the
+global and parent-directory layers, last one that sets the key wins; a repo- or
+worktree-level table is ignored, because the listener opens a socket that the
+session's own unit can reach and an agent could otherwise switch it on.
+
+*enable*
+	Boolean. With *enable = true*, and when clown exported *CLOWN_BRIDGE_DIR* and
+	*CLOWN_BRIDGE_UNIT*, *serve* listens on *bridge.sock* in that directory and
+	answers only peers running in the named unit's cgroup. Off when unset. Any
+	failure to start the listener is logged and *serve* runs without it.
+
 ## [host-queue]
 
 Host-wide gate policy (#424,

@@ -238,6 +238,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	// [host-queue] likewise (#424). See sweatfileio.TrustedHostQueueRecordCosts.
 	merged.HostQueue = nil
 
+	// [bridge] likewise. See sweatfileio.TrustedBridgeEnabled.
+	merged.Bridge = nil
+
 	// [folio] likewise (spinclass#438). See sweatfileio.TrustedFolio.
 	merged.Folio = nil
 

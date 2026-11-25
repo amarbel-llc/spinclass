@@ -282,6 +282,29 @@ func TrustedAllowMergeCommits(h sweatfile.Hierarchy, home, repoRoot string) (all
 	return allow, untrusted
 }
 
+// TrustedBridgeEnabled returns the [bridge].enable switch honoured for the
+// repo: a scalar, the last layer above the repo that sets it wins, off when
+// unset. The bridge opens a socket the session's own unit can reach, so a value
+// an agent can write into its repo's sweatfile must not turn it on; the paths of
+// the layers that set the key and may not are returned in untrusted.
+// Hierarchy.Merged never carries the table.
+func TrustedBridgeEnabled(h sweatfile.Hierarchy, home, repoRoot string) (enable bool, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Bridge == nil || src.File.Bridge.Enable == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			enable = *src.File.Bridge.Enable
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return enable, untrusted
+}
+
 // TrustedHostQueueRecordCosts returns the [host-queue].record-costs switch
 // honoured for the repo (#424 step 0): a scalar, the last layer above the repo
 // that sets it wins, on when unset. Host policy is the operator's, so layers

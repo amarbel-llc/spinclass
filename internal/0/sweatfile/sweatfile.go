@@ -365,6 +365,17 @@ type Keyholder struct {
 	Piggy *string `toml:"piggy"`
 }
 
+// Bridge is the switch for the per-session bridge listener inside serve
+// (docs/plans/2026-11-25-bridge-wire-v1.md). It decides whether a socket that
+// the session's own unit can reach is opened at all, so like Health it is
+// trusted only from layers above the repo, read ONLY through
+// sweatfileio.TrustedBridgeEnabled, and never merged.
+type Bridge struct {
+	// Enable turns the listener on when clown also exported the bridge
+	// directory and unit. Last trusted layer that sets it wins; unset means off.
+	Enable *bool `toml:"enable"`
+}
+
 // HostQueue is host-wide gate policy (#424,
 // docs/plans/2026-11-10-424-host-admission-queue-follow-up.md). It is host
 // policy, so like Health it is trusted only from layers above the repo, read
@@ -592,6 +603,7 @@ type Sweatfile struct {
 	Health         *Health         `toml:"health"`
 	HostQueue      *HostQueue      `toml:"host-queue"`
 	Keyholder      *Keyholder      `toml:"keyholder"`
+	Bridge         *Bridge         `toml:"bridge"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`
