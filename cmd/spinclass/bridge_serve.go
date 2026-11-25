@@ -79,6 +79,20 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 		servelog.Errorf("serve.bridge off: session key unresolved: %v", err)
 		return nil
 	}
+	// Every bridged call acts on the session this listener carries, so the key
+	// must be the one the frontend's own principal-to-session resolution gives
+	// this serve's principal. The principal resolves to nothing (the
+	// SessionStart stamp is not there yet), or to another session: stay off, and
+	// count it like a failed start.
+	principalKey, perr := confinement.SessionKeyOfPrincipal(currentPrincipal())
+	if perr == nil && principalKey != key {
+		perr = fmt.Errorf("the serve's principal resolves to %s, not to this listener's session %s", principalKey, key)
+	}
+	if perr != nil {
+		servelog.Errorf("serve.bridge off: %v", perr)
+		bridgeListenerFailed(key, perr)
+		return nil
+	}
 	log := openBridgeCrossingLog()
 	// The statsd endpoint resolves once, from the sweatfile's [metrics] and
 	// the environment, as the permission counters do.

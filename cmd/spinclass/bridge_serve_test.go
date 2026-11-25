@@ -6,11 +6,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/bridge"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 func bridgeTestEnv(dir, unit string) func(string) string {
@@ -109,6 +111,57 @@ func TestStartBridgeFromListensAndStopRemovesTheSocket(t *testing.T) {
 	stop()
 	if _, err := os.Lstat(sock); !os.IsNotExist(err) {
 		t.Errorf("socket remains after stop: %v", err)
+	}
+}
+
+// serve listens for a session only when the frontend's own principal-to-session
+// resolution agrees with the key the listener will carry: the key every bridged
+// call then acts on. Anything else stays off, once, counted like a failed start.
+func TestStartBridgeStaysOffUnlessThePrincipalResolvesToTheListenersKey(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		principalOf   func(f liarFixture) string // CLOWN_SESSION_ID of the serve
+		wantListening bool
+		wantErr       string
+	}{
+		{"the principal resolves to the listener's session", func(f liarFixture) string { return f.a.principal }, true, ""},
+		{"the principal resolves to another session", func(f liarFixture) string { return f.b.principal }, false, "resolves to " + "beta-repo/b-branch"},
+		{"the principal resolves to nothing", func(liarFixture) string { return "not-stamped-yet" }, false, "resolves to no session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLiarFixture(t)
+			// The listener's key is session A's; only the principal differs.
+			t.Setenv("SPINCLASS_SESSION_ID", f.a.key)
+			t.Setenv("CLOWN_SESSION_ID", tc.principalOf(f))
+			// A's mapping told the truth before newLiarFixture lied; the principal
+			// of the control case must resolve through a true mapping.
+			if err := confinement.RecordUnconfinedPrincipal(os.Getenv("XDG_STATE_HOME"), f.a.principal, f.a.key, f.a.wt); err != nil {
+				t.Fatal(err)
+			}
+			failures := stubBridgeFailureHook(t)
+			dir := shortBridgeDir(t)
+			old := bridgeResolve
+			bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit} }
+			t.Cleanup(func() { bridgeResolve = old })
+
+			stop := startBridge(context.Background(), e2eHandlerFactory())
+			if stop != nil {
+				defer stop()
+			}
+			_, serr := os.Lstat(filepath.Join(dir, bridge.SocketName))
+			if tc.wantListening {
+				if stop == nil || serr != nil || len(*failures) != 0 {
+					t.Fatalf("stop=%v socket=%v failures=%v, want a listener and no failure", stop != nil, serr, *failures)
+				}
+				return
+			}
+			if stop != nil || !os.IsNotExist(serr) {
+				t.Errorf("the bridge listens (stop=%v, socket %v) though the principal does not resolve to the listener's key", stop != nil, serr)
+			}
+			if len(*failures) != 1 || !strings.HasPrefix((*failures)[0], f.a.key+"|") || !strings.Contains((*failures)[0], tc.wantErr) {
+				t.Errorf("failures = %v, want exactly one for %s naming %q", *failures, f.a.key, tc.wantErr)
+			}
+		})
 	}
 }
 

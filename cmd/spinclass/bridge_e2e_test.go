@@ -477,6 +477,7 @@ func TestE2ERealPeerCheckRefusesAProcessOutsideTheUnit(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", e2ePrincipal)
 	t.Setenv("SPINCLASS_SESSION_ID", sessionTestKey)
+	stageSessionKey(t, sessionTestKey, e2ePrincipal)
 	old := bridgeResolve
 	bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit} }
 	t.Cleanup(func() { bridgeResolve = old })
@@ -844,6 +845,9 @@ func TestE2ESwitchOffMeansNoSocket(t *testing.T) {
 			t.Setenv("HOME", home)
 			t.Setenv("CLOWN_SESSION_ID", e2ePrincipal)
 			t.Setenv("SPINCLASS_SESSION_ID", sessionTestKey)
+			if c.wantSet {
+				stageSessionKey(t, sessionTestKey, e2ePrincipal)
+			}
 			old := bridgeResolve
 			bridgeResolve = func() bridgePlan { return resolveBridgePlan(getenv, home, repo) }
 			t.Cleanup(func() { bridgeResolve = old })
