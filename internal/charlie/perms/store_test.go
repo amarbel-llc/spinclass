@@ -275,6 +275,33 @@ func TestCallerConfinementComesFromFrontendEvidence(t *testing.T) {
 	}
 }
 
+// A call that arrived on the bridge is confined by origin, whatever the frontend
+// records say about the principal and the worktree; any other origin reads the
+// same evidence as CallerConfinement.
+func TestCallerConfinementForABridgedOriginIsConfined(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	plain := t.TempDir()
+	if err := confinement.RecordUnconfinedPrincipal(stateDir, "p-unconfined", "r/b", plain); err != nil {
+		t.Fatal(err)
+	}
+	bridged := confinement.WithOrigin(context.Background(), confinement.CallerOrigin{
+		Transport: confinement.TransportBridge, SessionKey: "r/b", Unit: "agent-a.service",
+	})
+	stdio := confinement.WithOrigin(context.Background(), confinement.CallerOrigin{Transport: confinement.TransportStdio})
+
+	if got := CallerConfinementFor(bridged, "p-unconfined", plain); got != store.ConfinementConfined {
+		t.Errorf("bridged origin: %v, want confined", got)
+	}
+	// The same principal and worktree read as unconfined without a bridged
+	// origin, so the confinement above came from the origin.
+	for name, ctx := range map[string]context.Context{"no origin": context.Background(), "stdio origin": stdio} {
+		if got := CallerConfinementFor(ctx, "p-unconfined", plain); got != store.ConfinementUnconfined {
+			t.Errorf("%s: %v, want unconfined (the frontend evidence)", name, got)
+		}
+	}
+}
+
 func TestStoreVerdictToolsWithoutSubcommand(t *testing.T) {
 	recorder := &recordingBackend{verdict: store.Allow}
 	stubStore(t, recorder, &store.Session{Dir: "/w", Branch: "b"})

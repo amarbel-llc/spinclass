@@ -19,7 +19,7 @@ func stubGritCallerUnconfined(t *testing.T) {
 	t.Helper()
 	original := gritCaller
 	t.Cleanup(func() { gritCaller = original })
-	gritCaller = func(cwd string) store.Session {
+	gritCaller = func(_ context.Context, cwd string) store.Session {
 		s := store.Session{Dir: cwd, Confinement: store.ConfinementUnconfined}
 		if branch, err := git.BranchCurrent(cwd); err == nil {
 			s.Branch = branch
@@ -31,8 +31,39 @@ func stubGritCallerUnconfined(t *testing.T) {
 func TestResolveGritCallerWithoutAPrincipalIsConfined(t *testing.T) {
 	t.Setenv("CLOWN_SESSION_ID", "")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementConfined {
+	if got := resolveGritCaller(context.Background(), t.TempDir()); got.Confinement != store.ConfinementConfined {
 		t.Fatalf("an unresolved caller must be confined, got %v", got.Confinement)
+	}
+}
+
+// A call that arrived on the bridge is confined whatever the serve's own
+// principal says, and works in the worktree of the session its origin names
+// (not the cwd, not the principal's mapping).
+func TestResolveGritCallerForABridgedOriginIsConfinedWhateverThePrincipalSays(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
+	removeRecord, err := registerServeRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(removeRecord)
+	a := stageSession(t, "alpha-repo", "a-branch", selfPrincipal, []string{"spawner"})
+
+	if got := resolveGritCaller(context.Background(), t.TempDir()); got.Confinement != store.ConfinementUnconfined {
+		t.Fatalf("control: with no origin this serve's caller is unconfined, got %v", got.Confinement)
+	}
+	got := resolveGritCaller(bridgedCtxFor(a.key), t.TempDir())
+	if got.Confinement != store.ConfinementConfined {
+		t.Errorf("a bridged origin must be confined, got %v", got.Confinement)
+	}
+	if got.Dir != a.wt || got.Branch != "a-branch" {
+		t.Errorf("got Dir=%q Branch=%q, want the origin's worktree %q and branch", got.Dir, got.Branch, a.wt)
+	}
+	// An origin that names no record is still confined, in the cwd, owning nothing.
+	got = resolveGritCaller(bridgedCtxFor("ghost/session"), t.TempDir())
+	if got.Confinement != store.ConfinementConfined || !got.NoSession {
+		t.Errorf("an unresolvable bridged origin: Confinement=%v NoSession=%v, want confined and no session", got.Confinement, got.NoSession)
 	}
 }
 
@@ -44,7 +75,7 @@ func TestResolveGritCallerWithAnUnrecordedPrincipalIsUnconfined(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(removeRecord)
-	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementUnconfined {
+	if got := resolveGritCaller(context.Background(), t.TempDir()); got.Confinement != store.ConfinementUnconfined {
 		t.Fatalf("a principal no record names must be unconfined, got %v", got.Confinement)
 	}
 }
@@ -52,7 +83,7 @@ func TestResolveGritCallerWithAnUnrecordedPrincipalIsUnconfined(t *testing.T) {
 func TestResolveGritCallerWithoutAServeRecordIsConfined(t *testing.T) {
 	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementConfined {
+	if got := resolveGritCaller(context.Background(), t.TempDir()); got.Confinement != store.ConfinementConfined {
 		t.Fatalf("a serve with no record must be confined, got %v", got.Confinement)
 	}
 }
@@ -86,11 +117,11 @@ func isolatedGitRepo(t *testing.T) string {
 
 func TestResolveGritCallerOutsideASessionWorktreeOwnsNothing(t *testing.T) {
 	repo := isolatedGitRepo(t)
-	got := resolveGritCaller(repo)
+	got := resolveGritCaller(context.Background(), repo)
 	if !got.NoSession || got.Branch != "" {
 		t.Fatalf("a plain checkout is no session worktree: NoSession=%v Branch=%q (the cwd's branch must not be borrowed)", got.NoSession, got.Branch)
 	}
-	if got := resolveGritCaller(t.TempDir()); !got.NoSession {
+	if got := resolveGritCaller(context.Background(), t.TempDir()); !got.NoSession {
 		t.Error("a directory that is no repository is no session worktree")
 	}
 }
@@ -114,7 +145,7 @@ func TestResolveGritCallerWiresTheCrossSessionCheck(t *testing.T) {
 		}
 	}
 
-	got := resolveGritCaller(repo)
+	got := resolveGritCaller(context.Background(), repo)
 	if got.SessionAt == nil {
 		t.Fatal("SessionAt not wired: the cross-session refusal would never run")
 	}
@@ -142,7 +173,7 @@ func TestResolveGritCallerInASessionWorktreeOwnsItsBranch(t *testing.T) {
 	}
 	mustGitIn(t, worktree, "checkout", "-b", "glad-buckeye--topic")
 
-	got := resolveGritCaller(sub)
+	got := resolveGritCaller(context.Background(), sub)
 	if got.NoSession || got.Dir != worktree || got.Branch != "glad-buckeye" {
 		t.Fatalf("got Dir=%q Branch=%q NoSession=%v, want the session worktree and the session branch (not the checked-out topic)", got.Dir, got.Branch, got.NoSession)
 	}

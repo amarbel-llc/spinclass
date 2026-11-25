@@ -265,15 +265,31 @@ func registerServeRecord() (func(), error) {
 // caller whose worktree is no recognised session worktree owns nothing
 // (store.Session.NoSession): its branch is not read from the cwd, and the body
 // refuses every write.
-func resolveGritCaller(cwd string) store.Session {
+//
+// A call that arrived on the bridge (ctx carries its origin) is confined by
+// origin, and works in the worktree of the session its origin names and holds
+// that session's recorded principal's handles: neither the serve's principal
+// nor the principal mapping decides anything for it.
+func resolveGritCaller(ctx context.Context, cwd string) store.Session {
 	s := store.Session{Dir: cwd, Confinement: store.ConfinementConfined}
 	principal := os.Getenv("CLOWN_SESSION_ID")
 	stateDir, err := confinement.DefaultStateDir()
-	if err == nil {
-		confined, _ := confinement.ClassifyServeCaller(confinement.Host{}, stateDir, principal, os.Getpid())
-		if !confined {
-			s.Confinement = store.ConfinementUnconfined
-		} else if worktree, ok := confinement.WorktreeOfPrincipal(confinement.Host{}, stateDir, principal); ok {
+	confined, _ := confinement.ClassifyOrigin(ctx, func() (bool, string) {
+		if err != nil {
+			return true, "state directory unresolved"
+		}
+		return confinement.ClassifyServeCaller(confinement.Host{}, stateDir, principal, os.Getpid())
+	})
+	switch {
+	case !confined:
+		s.Confinement = store.ConfinementUnconfined
+	case bridgedCall(ctx):
+		principal = ""
+		if st, _, oerr := bridgeOriginSession(ctx); oerr == nil {
+			s.Dir, principal = st.WorktreePath, st.Principal
+		}
+	case err == nil:
+		if worktree, ok := confinement.WorktreeOfPrincipal(confinement.Host{}, stateDir, principal); ok {
 			s.Dir = worktree
 		}
 	}
@@ -376,7 +392,7 @@ func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, er
 	if err != nil {
 		return "", fmt.Errorf("could not get working directory: %w", err)
 	}
-	return runGritAs(ctx, tool, args, gritCaller(cwd))
+	return runGritAs(ctx, tool, args, gritCaller(ctx, cwd))
 }
 
 // runGritAs runs one grit tool for an already-resolved caller. The MCP path and

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -144,6 +145,17 @@ func (p *sessionPeer) toolText(rep rpcReply) (text string, isErr bool) {
 
 var wantSessionToolNames = []string{
 	"cancel-restart", "close-this-session", "list-handles", "restart-this-session", "whoami",
+}
+
+// bridgeSessionToolNames is the reviewed set: a tool added to the bridge
+// widens what a session inside its unit can reach, so adding a name fails this
+// test until a reviewer has read the new tool's handler against the bridge
+// (its identity, its refusals) and added it here, in the same change.
+func TestBridgeSessionToolNamesAreTheReviewedSet(t *testing.T) {
+	reviewed := []string{"whoami", "list-handles", "restart-this-session", "cancel-restart", "close-this-session"}
+	if !slices.Equal(bridgeSessionToolNames, reviewed) {
+		t.Errorf("bridgeSessionToolNames = %v, want exactly the reviewed %v", bridgeSessionToolNames, reviewed)
+	}
 }
 
 func TestBridgeSessionListsExactlyTheFiveTools(t *testing.T) {

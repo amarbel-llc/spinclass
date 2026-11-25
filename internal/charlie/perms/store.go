@@ -1,6 +1,7 @@
 package perms
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,6 +60,19 @@ var resolveStoreSession = func(principal string) (store.Session, error) {
 // session is judged (resolveStoreSessionAtCwd); it never decides
 // confinement.
 func CallerConfinement(principal, worktree string) store.Confinement {
+	return CallerConfinementFor(context.Background(), principal, worktree)
+}
+
+// CallerConfinementFor is CallerConfinement for a call that carries a transport
+// origin: a call that arrived on the bridge is confined by construction (the
+// listener admitted only a peer inside the session's unit), whatever the
+// frontend records say about the principal, so no state is read for it. Every
+// other call (a stdio origin, or none) is judged by the frontend evidence as
+// CallerConfinement always did.
+func CallerConfinementFor(ctx context.Context, principal, worktree string) store.Confinement {
+	if confined, _ := confinement.ClassifyOrigin(ctx, func() (bool, string) { return false, "" }); confined {
+		return store.ConfinementConfined
+	}
 	stateDir, err := confinement.DefaultStateDir()
 	if err != nil {
 		return store.ConfinementUnresolved
