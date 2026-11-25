@@ -114,18 +114,24 @@ func TestConnectionsOverTheCapAreAnsweredBusyAndObservedOnce(t *testing.T) {
 	if !strings.HasPrefix(got, "ERR busy ") || !strings.HasSuffix(got, "\n") {
 		t.Errorf("the connection over the cap got %q, want ERR busy", got)
 	}
-	if n := waitEventCount(t, obs, 1); n != 1 || obs.events[0].Outcome != bridge.CodeBusy {
-		t.Errorf("events = %+v, want exactly one busy", obs.events)
+	n := waitEventCount(t, obs, 1)
+	obs.mu.Lock()
+	events := append([]Event(nil), obs.events...)
+	obs.mu.Unlock()
+	if n != 1 || len(events) != 1 || events[0].Outcome != bridge.CodeBusy {
+		t.Errorf("events = %+v, want exactly one busy", events)
 	}
 	// Freeing a slot makes room again.
 	_ = held[0].Close()
 	deadline = time.Now().Add(5 * time.Second)
 	for {
 		c := dial(t, dir)
-		send(t, c, "BRIDGE/1 control\n")
+		_, _ = c.Write([]byte("BRIDGE/1 control\n")) // a still-full server may already have closed
 		_ = c.SetReadDeadline(time.Now().Add(time.Second))
 		b := make([]byte, 3)
-		if _, err := c.Read(b); err == nil && string(b) == "OK\n" {
+		_, rerr := c.Read(b)
+		_ = c.Close()
+		if rerr == nil && string(b) == "OK\n" {
 			break
 		}
 		if time.Now().After(deadline) {
