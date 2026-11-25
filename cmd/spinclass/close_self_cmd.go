@@ -134,21 +134,15 @@ func rejectForce(args json.RawMessage) error {
 	return rejectForceFor(args, "close-this-session takes no force argument and never discards work; only the operator can, with `sc close --force`")
 }
 
-// runCloseThisSession is the tool body.
-func runCloseThisSession(args json.RawMessage) (string, error) {
+// runCloseThisSession is the tool body. A call that arrived on the bridge (ctx
+// carries its origin) closes the session its origin names, as that session's own
+// recorded principal; any other call resolves the caller through its principal.
+func runCloseThisSession(ctx context.Context, args json.RawMessage) (string, error) {
 	if err := rejectForce(args); err != nil {
 		return "", err
 	}
-	principal := currentPrincipal()
-	key, err := confinement.SessionKeyOfPrincipal(principal)
+	principal, st, err := closeCallerSession(ctx)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", errNoSelfSession, err)
-	}
-	st, err := session.FindByTarget(key)
-	if err != nil {
-		return "", err
-	}
-	if err := guardHandleTarget(st, "close"); err != nil {
 		return "", err
 	}
 
@@ -175,11 +169,37 @@ func runCloseThisSession(args json.RawMessage) (string, error) {
 		st.Key()), nil
 }
 
+// closeCallerSession resolves the session close-this-session acts on.
+func closeCallerSession(ctx context.Context) (principal string, st *session.State, err error) {
+	if st, bridged, err := bridgeOriginSession(ctx); bridged {
+		if err != nil {
+			return "", nil, err
+		}
+		if err := guardHandleTarget(st, "close"); err != nil {
+			return "", nil, err
+		}
+		return st.Principal, st, nil
+	}
+	principal = currentPrincipal()
+	key, err := confinement.SessionKeyOfPrincipal(principal)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %v", errNoSelfSession, err)
+	}
+	st, err = session.FindByTarget(key)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := guardHandleTarget(st, "close"); err != nil {
+		return "", nil, err
+	}
+	return principal, st, nil
+}
+
 // handleCloseThisSession is the `close-this-session` MCP tool handler. Over the
 // bridge, the refusal for want of allow-self-close is in the contract's text
 // (bridgeCloseSelfRefusal); every other outcome is unchanged.
 func handleCloseThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	text, err := runCloseThisSession(args)
+	text, err := runCloseThisSession(ctx, args)
 	if err != nil {
 		return bridgeSettingRefusal(ctx, err, settingAllowSelfClose, bridgeCloseSelfRefusal), nil
 	}

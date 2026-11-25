@@ -27,11 +27,9 @@ const (
 // drifts from the table, if a refusal comes back as a tool result instead of
 // -32001, or if an argument value is echoed.
 func TestE2ERefusalTextOfEachSessionVerb(t *testing.T) {
+	// The fixture's session is a real record with no restart hand-off and no
+	// allow-self-close.
 	b := startE2E(t, e2eOpts{})
-	// The session fixture comes after the listener, so its environment (the
-	// caller's principal, home and state) is the one the handlers read; the
-	// fixture has no restart hand-off and no allow-self-close.
-	selfCloseFixture(t, false)
 	p := b.open("session")
 	p.initialize(protocol.ProtocolVersionV1)
 

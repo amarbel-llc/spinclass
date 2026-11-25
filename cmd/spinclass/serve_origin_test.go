@@ -109,6 +109,7 @@ func TestBridgedWhoamiNamesTheListenersSessionNotTheArguments(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", "the-serve-principal")
+	stageSessionKey(t, bridgedSessionKey, "the-serve-principal")
 	forged := json.RawMessage(`{"principal":"forged-principal","session_key":"forged/key","child":"forged/child"}`)
 	res, err := handleWhoami(bridgedCtx(), forged, nil)
 	if err != nil || res.IsErr {
@@ -133,6 +134,7 @@ func TestBridgedCallNamingAnotherSessionIsRefused(t *testing.T) {
 	serveCallerConfined = func() (bool, string) { return false, "unconfined" }
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
+	stageSessionKey(t, bridgedSessionKey, "the-serve-principal")
 	for _, tc := range []struct {
 		tool, args string
 		run        func(context.Context, json.RawMessage) (string, bool)

@@ -341,7 +341,13 @@ func callerSession() (principal string, st *session.State, err error) {
 
 // runRestartThisSession is the restart-this-session tool body.
 func runRestartThisSession(p restartThisSessionParams) (string, error) {
-	principal, st, err := callerSession()
+	return runRestartThisSessionFor(context.Background(), p)
+}
+
+// runRestartThisSessionFor is runRestartThisSession for a call with ctx: a call
+// that arrived on the bridge restarts the session its origin names.
+func runRestartThisSessionFor(ctx context.Context, p restartThisSessionParams) (string, error) {
+	principal, st, err := callerSessionFor(ctx, "restart")
 	if err != nil {
 		return "", err
 	}
@@ -367,7 +373,7 @@ func handleRestartThisSession(ctx context.Context, args json.RawMessage, _ comma
 			return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	text, err := runRestartThisSession(p)
+	text, err := runRestartThisSessionFor(ctx, p)
 	if err != nil {
 		return bridgeSettingRefusal(ctx, err, settingRestartHandoff, bridgeRestartSelfRefusal), nil
 	}
@@ -1229,11 +1235,18 @@ func cancelRestartParamList() []command.Param {
 // call the hand-off: the frontend drops its pending restart when restart-preflight
 // next answers "none". Nothing queued is a success, so the call is idempotent.
 func runCancelRestart(p cancelRestartParams) (string, error) {
+	return runCancelRestartFor(context.Background(), p)
+}
+
+// runCancelRestartFor is runCancelRestart for a call with ctx: the own form of a
+// call that arrived on the bridge cancels the restart of the session its origin
+// names.
+func runCancelRestartFor(ctx context.Context, p cancelRestartParams) (string, error) {
 	var st *session.State
 	var caller, sessionsOwnID string
 	var err error
 	if p.Child == "" {
-		caller, st, err = callerSession()
+		caller, st, err = callerSessionFor(ctx, "restart")
 		sessionsOwnID = caller
 	} else {
 		st, caller, err = authorizeRestartChild("cancel-restart", p.Child)
@@ -1336,7 +1349,7 @@ func handleCancelRestart(ctx context.Context, args json.RawMessage, _ command.Pr
 			return refusal, nil
 		}
 	}
-	text, err := runCancelRestart(p)
+	text, err := runCancelRestartFor(ctx, p)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}

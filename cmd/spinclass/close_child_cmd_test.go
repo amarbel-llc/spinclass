@@ -136,17 +136,25 @@ func TestAuthorizeChildReapMatrix(t *testing.T) {
 // state they write afterward.
 func stageChildWorktree(t *testing.T) (repoPath, wtPath string) {
 	t.Helper()
+	return stageNamedWorktree(t, "worker", "kid")
+}
+
+// stageNamedWorktree is stageChildWorktree for a repo directory and branch of
+// the caller's choosing, so one test can stand up several sessions whose keys
+// (<repo-dirname>/<branch>) differ.
+func stageNamedWorktree(t *testing.T, repoName, branch string) (repoPath, wtPath string) {
+	t.Helper()
 	testgit.RequireGit(t)
 
-	repoPath = filepath.Join(t.TempDir(), "worker")
+	repoPath = filepath.Join(t.TempDir(), repoName)
 	testgit.MustInit(t, repoPath)
 	sweatfile := "[hooks]\ndisable-nix-gc = true\n"
 	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"), []byte(sweatfile), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	wtPath = filepath.Join(repoPath, ".worktrees", "kid")
-	testgit.MustWorktreeAdd(t, repoPath, wtPath, "kid")
+	wtPath = filepath.Join(repoPath, ".worktrees", branch)
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, branch)
 
 	excludePath := filepath.Join(repoPath, ".git", "info", "exclude")
 	if err := os.WriteFile(excludePath, []byte(".spinclass/\n"), 0o644); err != nil {

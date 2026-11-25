@@ -43,7 +43,8 @@ import (
 )
 
 const (
-	e2ePrincipal = "the-serve-principal"
+	// A UUID: restart-this-session refuses any other shape of principal.
+	e2ePrincipal = "7a1c93d2-4b58-4e0a-9f26-3c8d51e7b0a4"
 	e2eUnit      = "agent.service"
 	// e2eVictim is the session every forgery below tries to act as.
 	e2eVictim = "victim/session"
@@ -66,6 +67,10 @@ func e2eHandlerFactory() func(rec crossingRecorder, stats statsd.Client) bridges
 type e2eOpts struct {
 	peer         func(net.Conn, string) error // nil admits every peer
 	helloTimeout time.Duration                // zero is the contract's 5 s
+	// liars stages two real sessions (the listener's A and a victim B), the
+	// trusted settings that allow restart and self-close, and an environment
+	// and principal mapping that both name B (see newLiarFixture).
+	liars bool
 }
 
 // e2eBridge is the one small fixture every test shares.
@@ -75,6 +80,7 @@ type e2eBridge struct {
 	dir     string
 	sock    string
 	logPath string
+	liars   liarFixture // set when e2eOpts.liars
 	cancel  context.CancelFunc
 	stop    func()
 	drain   func() []string
@@ -92,7 +98,16 @@ func startE2E(t *testing.T, o e2eOpts) *e2eBridge {
 	t.Setenv("CLOWN_SESSION_ID", e2ePrincipal)
 	b.drain = queueStatsdSink(t)
 	b.sock = filepath.Join(b.dir, bridge.SocketName)
-	b.logPath = filepath.Join(b.state, "spinclass", "bridge", e2ePrincipal+".ndjson")
+	// The listener's session is a real record, as it is in serve: a bridged call
+	// acts on the record its origin names.
+	listenerKey := sessionTestKey
+	if o.liars {
+		b.liars = stageLiars(t)
+		listenerKey = b.liars.a.key
+	} else {
+		stageSessionKey(t, sessionTestKey, e2ePrincipal)
+	}
+	b.logPath = filepath.Join(b.state, "spinclass", "bridge", currentPrincipal()+".ndjson")
 
 	clog := openBridgeCrossingLog()
 	stats := statsd.Resolve("", false)
@@ -103,7 +118,7 @@ func startE2E(t *testing.T, o e2eOpts) *e2eBridge {
 	ctx, cancel := context.WithCancel(context.Background())
 	b.cancel = cancel
 	b.stop = startBridgeFrom(ctx, bridgePlan{Dir: b.dir, Unit: e2eUnit}, bridgeserver.Options{
-		SessionKey:   sessionTestKey,
+		SessionKey:   listenerKey,
 		Handler:      e2eHandlerFactory()(clog, stats),
 		Observer:     &bridgeObserver{log: clog, stats: stats},
 		PeerCheck:    peer,

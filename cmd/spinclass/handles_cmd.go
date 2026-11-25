@@ -12,7 +12,6 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
@@ -456,8 +455,12 @@ func displayRights(s *session.State, principal string) string {
 // is pending a handle. With accept, every pending one is exercised (accepted)
 // first, per FDR 0032 D12's first-use rule.
 func runListHandles(p listHandlesParams) (string, error) {
-	callerPrincipal := currentPrincipal()
+	return runListHandlesAs(currentPrincipal(), p)
+}
 
+// runListHandlesAs is runListHandles for a caller principal already established
+// (a bridged call acts as its origin's session's recorded principal).
+func runListHandlesAs(callerPrincipal string, p listHandlesParams) (string, error) {
 	all, err := session.ListAll(nil)
 	if err != nil {
 		return "", fmt.Errorf("listing sessions: %w", err)
@@ -516,7 +519,14 @@ func handleListHandles(ctx context.Context, args json.RawMessage, _ command.Prom
 			return refusal, nil
 		}
 	}
-	text, err := runListHandles(p)
+	principal := currentPrincipal()
+	if st, bridged, err := bridgeOriginSession(ctx); bridged {
+		if err != nil {
+			return command.TextErrorResult(err.Error()), nil
+		}
+		principal = st.Principal
+	}
+	text, err := runListHandlesAs(principal, p)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
@@ -538,16 +548,16 @@ func listHandlesParamList() []command.Param {
 // principal (FDR 0032 D1), its session key when it has one, then the same
 // held/pending handle listing as list-handles.
 func runWhoami() (string, error) {
-	return runWhoamiFor(bestEffortSessionKey())
+	return runWhoamiAs(currentPrincipal(), bestEffortSessionKey())
 }
 
-// runWhoamiFor is runWhoami for a session key the caller already established.
-func runWhoamiFor(key string) (string, error) {
-	principal := currentPrincipal()
+// runWhoamiAs is runWhoami for a principal and a session key the caller already
+// established.
+func runWhoamiAs(principal, key string) (string, error) {
 	if key == "" {
 		key = "(none)"
 	}
-	handles, err := runListHandles(listHandlesParams{})
+	handles, err := runListHandlesAs(principal, listHandlesParams{})
 	if err != nil {
 		return "", err
 	}
@@ -560,14 +570,18 @@ func runWhoamiFor(key string) (string, error) {
 // registration serves both `sc whoami` and the `whoami` MCP tool — the same
 // reason those two commands need no separate CLI registration either.
 //
-// A call that arrived on the bridge names the session key its listener was
-// created for (the origin in ctx), never anything in the request.
+// A call that arrived on the bridge answers for the session its listener was
+// created for (the origin in ctx): that session's key and the principal its
+// frontend record carries, never anything in the request or the environment.
 func handleWhoami(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	key := bestEffortSessionKey()
-	if o, ok := confinement.OriginFrom(ctx); ok && o.Bridged() {
-		key = o.SessionKey
+	principal, key := currentPrincipal(), bestEffortSessionKey()
+	if st, bridged, err := bridgeOriginSession(ctx); bridged {
+		if err != nil {
+			return command.TextErrorResult(err.Error()), nil
+		}
+		principal, key = st.Principal, st.Key()
 	}
-	text, err := runWhoamiFor(key)
+	text, err := runWhoamiAs(principal, key)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}

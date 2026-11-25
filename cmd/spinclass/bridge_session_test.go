@@ -37,6 +37,7 @@ func startSessionBridgeWith(t *testing.T, rec crossingRecorder, obs bridgeserver
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", "the-serve-principal")
+	stageSessionKey(t, sessionTestKey, "the-serve-principal")
 	reg := server.NewToolRegistryV1()
 	buildApp().RegisterMCPToolsV1(reg)
 	dir := shortBridgeDir(t)
