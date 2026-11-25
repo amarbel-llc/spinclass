@@ -125,7 +125,7 @@ func khUseFake(t *testing.T, f *khFakeRunner) (launcherBuilt *int) {
 	built := 0
 	prev := keyholderLauncherFn
 	t.Cleanup(func() { keyholderLauncherFn = prev })
-	keyholderLauncherFn = func() (*keyholder.Launcher, error) {
+	keyholderLauncherFn = func(keyholder.Tools) (*keyholder.Launcher, error) {
 		built++
 		return &keyholder.Launcher{Base: filepath.Join(base, "kh"), Tools: keyholder.Tools{Fibby: "/pin/fibby", Piggy: "/pin/piggy"}, Run: f, Wait: time.Second}, nil
 	}
@@ -237,7 +237,7 @@ func TestKeyholderSwitchedOffLeavesNoPairForNewSessions(t *testing.T) {
 	if len(f.started) != before {
 		t.Errorf("a new session started units after the switch went off: %v", f.started[before:])
 	}
-	l, _ := keyholderLauncherFn()
+	l, _ := keyholderLauncherFn(keyholder.Tools{})
 	if _, serr := os.Lstat(keyholder.SessionDir(l.Base, "repo/new")); !os.IsNotExist(serr) {
 		t.Errorf("a new session has a key holder directory after the switch went off: %v", serr)
 	}

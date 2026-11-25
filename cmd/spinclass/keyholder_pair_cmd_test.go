@@ -43,7 +43,7 @@ func TestKeyholderPairStartStatusStopWalksTheWholeLifecycleAndLeavesNothing(t *t
 			t.Errorf("unit %s is still active after stop", u)
 		}
 	}
-	l, _ := keyholderLauncherFn()
+	l, _ := keyholderLauncherFn(keyholder.Tools{})
 	if _, err := os.Lstat(keyholder.SessionDir(l.Base, "repo/live")); !os.IsNotExist(err) {
 		t.Errorf("stop left the session directory: %v", err)
 	}

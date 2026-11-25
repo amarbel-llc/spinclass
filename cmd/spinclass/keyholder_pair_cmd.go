@@ -32,8 +32,8 @@ func registerKeyholderPairCommand(app *command.App) {
 		Params: []command.Param{
 			{Name: "action", Type: command.String, Required: true, Description: "start, stop or status"},
 			{Name: "session", Type: command.String, Required: true, Description: "The session key the pair is named for"},
-			{Name: "fibby", Type: command.String, Description: "Absolute path of the fibby holder build to run (debugging; a pinned build needs neither flag)"},
-			{Name: "piggy", Type: command.String, Description: "Absolute path of the piggy binary to run (debugging; a pinned build needs neither flag)"},
+			{Name: "fibby", Type: command.String, Description: "Absolute path of the fibby holder build to run (both flags are required here: only a session launch reads [keyholder] fibby from the sweatfile)"},
+			{Name: "piggy", Type: command.String, Description: "Absolute path of the piggy binary to run (both flags are required here: only a session launch reads [keyholder] piggy from the sweatfile)"},
 		},
 		RunCLI: runKeyholderPair,
 	})
@@ -52,7 +52,7 @@ func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
 	if f.Session == "" {
 		return errors.New("keyholder-pair: --session is required")
 	}
-	launcher := keyholderLauncherFn
+	launcher := func() (*keyholder.Launcher, error) { return keyholderLauncherFn(keyholder.Tools{}) }
 	if f.Fibby != "" || f.Piggy != "" {
 		launcher = func() (*keyholder.Launcher, error) { return launcherForTools(f.Fibby, f.Piggy) }
 	}

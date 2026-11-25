@@ -14,49 +14,53 @@ import (
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
-// fibbyBin and piggyBin are the absolute store paths of the two programs the
-// key holder pair runs, burnt in at link time by a build that pins them
-// (-X main.fibbyBin=..., -X main.piggyBin=...). Unpinned they are empty and the
-// launcher REFUSES to start a pair: it never looks either up on PATH, because
-// the pair holds a session's key and runs outside the unit, and a name resolved
-// from a PATH a session can influence is the hole.
-var (
-	fibbyBin = ""
-	piggyBin = ""
-)
-
 func init() {
 	spawn.KeyholderEnv = func(home, repoPath, sessionKey string) (map[string]string, func(), error) {
 		return keyholderSessionEnvUndo(home, repoPath, sessionKey, os.Stderr)
 	}
 }
 
-// keyholderLauncherFn builds the launcher for the real system; tests replace it.
+// keyholderLauncherFn builds the launcher for the real system from the two
+// program paths the trusted [keyholder] setting names; tests replace it.
 var keyholderLauncherFn = realKeyholderLauncher
 
-// realKeyholderLauncher requires both programs to be pinned into this build as
-// absolute paths and refuses, naming the reason, when either is not.
-func realKeyholderLauncher() (*keyholder.Launcher, error) {
-	return launcherForTools(fibbyBin, piggyBin)
+// realKeyholderLauncher is the launcher a session launch uses. The programs come
+// ONLY from the trusted [keyholder] fibby and piggy settings, which the host's
+// configuration writes from the one piggy the host runs as its agent: spinclass
+// pins no piggy of its own and never looks either program up on PATH, because
+// the pair holds a session's key and runs outside the unit, and a name resolved
+// from a PATH a session can influence is the hole. Either path unset or not a
+// store program (CheckKeyholderToolPath) refuses, naming the setting.
+func realKeyholderLauncher(tools keyholder.Tools) (*keyholder.Launcher, error) {
+	for _, p := range []struct{ name, path string }{{"fibby", tools.Fibby}, {"piggy", tools.Piggy}} {
+		if err := sweatfileio.CheckKeyholderToolPath(p.name, p.path); err != nil {
+			return nil, fmt.Errorf("the key holder is on but %w: a pair is never started from a name looked up on PATH", err)
+		}
+	}
+	return newKeyholderLauncher(tools), nil
 }
 
 // launcherForTools builds the real-system launcher for two absolute program
-// paths. The pins of a build come through realKeyholderLauncher; the hidden
-// `sc keyholder-pair` may name its own, because a person at a terminal chose
-// them. A session launch never does.
+// paths a person at a terminal named: the hidden `sc keyholder-pair` takes
+// them from flags because that person chose them. A session launch never does
+// (it goes through realKeyholderLauncher and the trusted settings).
 func launcherForTools(fibby, piggy string) (*keyholder.Launcher, error) {
 	for _, p := range []struct{ name, path string }{{"fibby", fibby}, {"piggy", piggy}} {
 		if p.path == "" {
-			return nil, fmt.Errorf("the key holder is on but %s is not pinned into this build (-X main.%sBin): a pair is never started from a name looked up on PATH", p.name, p.name)
+			return nil, fmt.Errorf("%s is not named: pass --fibby and --piggy (absolute paths); a session launch reads [keyholder] fibby and piggy instead, and a pair is never started from a name looked up on PATH", p.name)
 		}
 		if !filepath.IsAbs(p.path) {
-			return nil, fmt.Errorf("the key holder is on but the pinned %s %q is not an absolute path", p.name, p.path)
+			return nil, fmt.Errorf("the %s %q is not an absolute path", p.name, p.path)
 		}
 	}
+	return newKeyholderLauncher(keyholder.Tools{Fibby: fibby, Piggy: piggy}), nil
+}
+
+func newKeyholderLauncher(tools keyholder.Tools) *keyholder.Launcher {
 	return &keyholder.Launcher{
-		Base: keyholder.StateBase(), Tools: keyholder.Tools{Fibby: fibby, Piggy: piggy}, Run: keyholder.SystemdRunner{},
+		Base: keyholder.StateBase(), Tools: tools, Run: keyholder.SystemdRunner{},
 		Log: func(format string, args ...any) { sessionlog.Infof(format, args...) },
-	}, nil
+	}
 }
 
 // keyholderSessionEnv is the key holder's one entry point for a session launch:
@@ -90,7 +94,8 @@ func keyholderSessionEnvUndo(home, repoPath, sessionKey string, stderr io.Writer
 	if !on {
 		return nil, nil, nil
 	}
-	l, err := keyholderLauncherFn()
+	fibby, piggy, _ := sweatfileio.TrustedKeyholderTools(h, home, repoPath) // untrusted layers were reported above
+	l, err := keyholderLauncherFn(keyholder.Tools{Fibby: fibby, Piggy: piggy})
 	if err != nil {
 		return nil, nil, err
 	}

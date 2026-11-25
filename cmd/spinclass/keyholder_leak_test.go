@@ -11,7 +11,7 @@ import (
 
 func khLauncherFor(t *testing.T) (*keyholder.Launcher, error) {
 	t.Helper()
-	return keyholderLauncherFn()
+	return keyholderLauncherFn(keyholder.Tools{})
 }
 
 // A launch that fails after this start created the pair stops the pair; a pair
