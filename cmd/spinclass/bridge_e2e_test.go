@@ -612,7 +612,7 @@ func TestE2EConfinedVerbIsMinus32001AndUnlistedToolIsMinus32602(t *testing.T) {
 		t.Errorf("update-this-session-description: %+v", rep.Error)
 	}
 	rep = p.call("tools/call", map[string]any{"name": "merge-this-session", "arguments": map[string]any{}})
-	if rep.Error == nil || rep.Error.Code != jsonrpc.InvalidParams || rep.Error.Code != -32602 || !strings.Contains(rep.Error.Message, "unknown tool: merge-this-session") {
+	if rep.Error == nil || rep.Error.Code != jsonrpc.InvalidParams || !strings.Contains(rep.Error.Message, "unknown tool: merge-this-session") {
 		t.Errorf("an unlisted tool: %+v, want -32602", rep.Error)
 	}
 
