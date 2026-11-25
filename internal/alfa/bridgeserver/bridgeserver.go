@@ -65,6 +65,9 @@ var (
 	dialStale = func(network, addr string, timeout time.Duration) (net.Conn, error) {
 		return net.DialTimeout(network, addr, timeout)
 	}
+	// afterBind runs between the bind and the check of what was bound; tests
+	// plant things there.
+	afterBind = func(path string) {}
 	// peerUID is the same-uid check of a peer; it returns the peer's pid.
 	peerUID = policybroker.SameUID
 	// peerUnitCgroup is the check that pid runs in unit's cgroup.
@@ -134,6 +137,9 @@ type Options struct {
 	Observer Observer
 	// HelloTimeout overrides bridge.HelloTimeout (tests).
 	HelloTimeout time.Duration
+	// Tick makes the ticker of the periodic socket check; nil is a real
+	// time.Ticker. It returns the channel and what stops it.
+	Tick func(d time.Duration) (<-chan time.Time, func())
 	// Logf logs one line; nil discards.
 	Logf func(format string, args ...any)
 }
@@ -174,6 +180,9 @@ type Server struct {
 	wg          sync.WaitGroup
 	closeOnce   sync.Once
 	closeErr    error
+	lock        *os.File
+	deadMu      sync.Mutex
+	dead        error
 	ctlMu       sync.Mutex
 	control     net.Conn
 }
@@ -196,26 +205,17 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 	if err := checkDir(dir); err != nil {
 		return nil, err
 	}
-	if err := clearStaleSocket(path); err != nil {
+	// The lock is held for the life of the server: clear-and-bind is then one
+	// step against any other listener of this directory, and a second frontend
+	// cannot take the path over while this one serves.
+	lock, err := lockDir(dir)
+	if err != nil {
 		return nil, err
 	}
-	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	l, id, err := bindSocket(path)
 	if err != nil {
-		return nil, fmt.Errorf("bridge: listen on %s: %w", path, err)
-	}
-	// The server removes its own socket on Close, and only if it is still the
-	// socket this server made (see removeOwnSocket).
-	l.SetUnlinkOnClose(false)
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = l.Close()
-		_ = os.Remove(path)
-		return nil, fmt.Errorf("bridge: chmod %s: %w", path, err)
-	}
-	id, ok := fileID(path)
-	if !ok {
-		_ = l.Close()
-		_ = os.Remove(path)
-		return nil, fmt.Errorf("bridge: cannot identify the socket at %s", path)
+		_ = lock.Close()
+		return nil, err
 	}
 	if opts.Observer == nil {
 		opts.Observer = noopObserver{}
@@ -238,7 +238,101 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{l: l, path: path, id: id, unit: unit, opts: opts, ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}}, nil
+	return &Server{l: l, path: path, id: id, unit: unit, opts: opts, lock: lock, ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}}, nil
+}
+
+const (
+	lockName = ".bridge.lock"
+	// socketCheckInterval is how often a serving listener checks that its socket
+	// file is still the one it made.
+	socketCheckInterval = 2 * time.Second
+)
+
+// umaskMu serialises the umask change around a bind: the umask is process wide.
+var umaskMu sync.Mutex
+
+// lockDir takes the directory's exclusive lock, without blocking. The lock file
+// is opened without following a link and kept 0600.
+func lockDir(dir string) (*os.File, error) {
+	p := filepath.Join(dir, lockName)
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("bridge: opening %s: %w", p, err)
+	}
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("bridge: %s is not a regular file", p)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("bridge: chmod %s: %w", p, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("bridge: a live listener already holds %s (%w): another frontend serves this session; not replacing its socket", p, err)
+	}
+	return f, nil
+}
+
+// bindSocket clears a stale socket and binds path with its mode right from the
+// bind (the umask is narrowed around it, so no moment exists with a wider mode
+// and no chmod by path is needed), then checks what is on disk is the socket it
+// made: a socket, owner only, ours.
+func bindSocket(path string) (*net.UnixListener, socketID, error) {
+	if err := clearStaleSocket(path); err != nil {
+		return nil, socketID{}, err
+	}
+	umaskMu.Lock()
+	old := syscall.Umask(0o177)
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	syscall.Umask(old)
+	umaskMu.Unlock()
+	if err != nil {
+		return nil, socketID{}, fmt.Errorf("bridge: listen on %s: %w", path, err)
+	}
+	// The server removes its own socket on Close, and only if it is still the
+	// socket this server made (see removeOwnSocket).
+	l.SetUnlinkOnClose(false)
+	bound, _ := fileID(path)
+	afterBind(path)
+	id, err := checkBound(path)
+	if err != nil || id != bound {
+		_ = l.Close()
+		// Only what this bind made is removed; whatever else stands there is
+		// not ours to touch.
+		if cur, ok := fileID(path); ok && cur == bound {
+			_ = os.Remove(path)
+		}
+		if err == nil {
+			err = fmt.Errorf("the file at %s is not the socket that was bound", path)
+		}
+		return nil, socketID{}, fmt.Errorf("bridge: %w", err)
+	}
+	return l, id, nil
+}
+
+// checkBound requires path, looked at without following a link, to be a socket
+// of this uid that nobody else can open.
+func checkBound(path string) (socketID, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return socketID{}, err
+	}
+	if fi.Mode()&os.ModeSocket == 0 {
+		return socketID{}, fmt.Errorf("%s is not a socket after the bind", path)
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		return socketID{}, fmt.Errorf("%s has mode %o after the bind", path, fi.Mode().Perm())
+	}
+	if uid, ok := statUID(fi); !ok || int(uid) != os.Getuid() {
+		return socketID{}, fmt.Errorf("%s is not owned by this uid after the bind", path)
+	}
+	id, ok := fileID(path)
+	if !ok {
+		return socketID{}, fmt.Errorf("cannot identify the socket at %s", path)
+	}
+	return id, nil
 }
 
 // socketID is the identity of a file on disk: device and inode.
@@ -378,9 +472,13 @@ func (s *Server) Serve(ctx context.Context) error {
 		case <-s.ctx.Done():
 		}
 	}()
+	go s.watchSocket()
 	for {
 		conn, err := s.l.Accept()
 		if err != nil {
+			if d := s.deadErr(); d != nil {
+				return d
+			}
 			if s.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
@@ -403,6 +501,57 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 
+// declareDead records why the listener cannot serve any more and closes it:
+// Serve then returns that reason.
+func (s *Server) declareDead(reason error) {
+	s.deadMu.Lock()
+	if s.dead == nil {
+		s.dead = reason
+	}
+	s.deadMu.Unlock()
+	_ = s.Close()
+}
+
+func (s *Server) deadErr() error {
+	s.deadMu.Lock()
+	defer s.deadMu.Unlock()
+	return s.dead
+}
+
+// socketGone is the reason a listener whose file is not its own is dead.
+func (s *Server) socketGone() error {
+	if cur, ok := fileID(s.path); !ok || cur != s.id {
+		return fmt.Errorf("bridge: the socket at %s was removed or replaced; nothing can connect to this listener", s.path)
+	}
+	return nil
+}
+
+// watchSocket checks every interval that the socket file is still the one this
+// server made. A listener on an unlinked inode is silently unreachable, so it
+// is declared dead and the caller is told.
+func (s *Server) watchSocket() {
+	tick := s.opts.Tick
+	if tick == nil {
+		tick = func(d time.Duration) (<-chan time.Time, func()) {
+			t := time.NewTicker(d)
+			return t.C, t.Stop
+		}
+	}
+	ch, stop := tick(socketCheckInterval)
+	defer stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ch:
+			if err := s.socketGone(); err != nil {
+				s.declareDead(err)
+				return
+			}
+		}
+	}
+}
+
 // Close stops accepting, ends every stream, waits for the handlers and removes
 // the socket file.
 func (s *Server) Close() error {
@@ -422,6 +571,9 @@ func (s *Server) Close() error {
 		s.wg.Wait()
 		if err := s.removeOwnSocket(); err != nil && s.closeErr == nil {
 			s.closeErr = err
+		}
+		if s.lock != nil {
+			_ = s.lock.Close()
 		}
 	})
 	return s.closeErr
