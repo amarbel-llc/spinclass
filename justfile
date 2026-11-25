@@ -3119,3 +3119,107 @@ explore-worktree-hooks:
 
     if [[ $pass -eq 0 ]]; then echo "VERDICT: per-worktree hooksPath isolation WORKS"; else echo "VERDICT: isolation FAILED (see above)"; fi
     exit $pass
+
+# Export the tracked tree at <rev> (git archive, no .git) into .tmp/<name>/tree/ so a
+# reviewer reads exactly that commit while the branch keeps moving, then verify the
+# export is complete (debug-tree-export-check) and fail if it is not. Serves the review
+# loop; writes only under .tmp/<name>.
+[group("debug")]
+debug-tree-export name rev: && (debug-tree-export-check name rev)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=".tmp/{{ name }}/tree"
+    rm -rf "$out"
+    mkdir -p "$out"
+    git archive "{{ rev }}" | tar -x -C "$out"
+    echo "exported $(git rev-parse "{{ rev }}") to $out"
+
+# Verify an existing .tmp/<name>/tree/ export against <rev>: every regular file and
+# symlink in `git ls-tree -r <rev>` exists with the same blob id (a symlink: the same
+# target), the counts agree, nothing extra is in the tree (stray files, empty
+# directories), and no submodule was left out. Prints `TREE-EXPORT-OK <rev> <n> files`,
+# or up to 10 problems and exits non-zero. Serves the review loop: run it later on a
+# review package to know it still is the commit. Read-only.
+[group("debug")]
+debug-tree-export-check name rev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export LC_ALL=C
+    out=".tmp/{{ name }}/tree"
+    rev="{{ rev }}"
+    [ -d "$out" ] || { echo "TREE-EXPORT-FAIL $rev: $out does not exist" >&2; exit 1; }
+    commit=$(git rev-parse --verify "$rev^{commit}")
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    problems="$scratch/problems"
+    want="$scratch/want"
+    : > "$problems"
+    : > "$want"
+    git ls-tree -r -z --full-tree "$commit" > "$scratch/tree.z"
+    nwant=0
+    while IFS= read -r -d '' rec; do
+      meta=${rec%%$'\t'*}
+      path=${rec#*$'\t'}
+      read -r mode _ sha <<< "$meta"
+      case "$path" in
+        *$'\n'*) echo "path with a newline cannot be checked: ${path//$'\n'/\\n}" >> "$problems"; continue ;;
+      esac
+      if [ "$mode" = 160000 ]; then
+        echo "submodule not exported: $path ($sha)" >> "$problems"
+        continue
+      fi
+      printf '%s\n' "$path" >> "$want"
+      nwant=$((nwant + 1))
+      f="$out/$path"
+      if [ "$mode" = 120000 ]; then
+        if [ ! -L "$f" ]; then echo "missing or not a symlink: $path" >> "$problems"; continue; fi
+        got=$(printf '%s' "$(readlink -- "$f")" | git hash-object --stdin)
+      else
+        if [ -L "$f" ] || [ ! -f "$f" ]; then echo "missing or not a regular file: $path" >> "$problems"; continue; fi
+        got=$(git hash-object --no-filters -- "$f")
+      fi
+      if [ "$got" != "$sha" ]; then
+        echo "content differs: $path (exported blob $got, $rev has $sha)" >> "$problems"
+      fi
+    done < "$scratch/tree.z"
+    sort "$want" > "$scratch/want.sorted"
+    { find "$out" ! -type d -printf '%P\n'; find "$out" -mindepth 1 -type d -empty -printf '%P/ (empty directory)\n'; } | sort > "$scratch/have.sorted"
+    nhave=$(find "$out" ! -type d | wc -l)
+    if [ "$nhave" -ne "$nwant" ]; then
+      echo "file count: $out holds $nhave files and symlinks, $rev has $nwant" >> "$problems"
+    fi
+    comm -13 "$scratch/want.sorted" "$scratch/have.sorted" | sed "s|^|extra, not in $rev: |" >> "$problems"
+    if [ -s "$problems" ]; then
+      echo "TREE-EXPORT-FAIL $rev ($commit): $(wc -l < "$problems") problem(s) in $out; first up to 10:" >&2
+      head -n 10 "$problems" | sed 's/^/  /' >&2
+      exit 1
+    fi
+    echo "TREE-EXPORT-OK $rev $nwant files"
+
+# Build a review package for a fresh reviewer under .tmp/<name>/: full.diff (base..HEAD),
+# src/ (touched non-test Go sources whole), tests/ (touched test files), docs/ (touched
+# docs and the justfile), and context/ (the extra files named, whole). Files are copied
+# as .txt with the path's slashes as `__`. Serves the review loop for security-boundary
+# changes; no tool writes outside .tmp/<name>.
+[group("debug")]
+debug-review-package name base *context:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=".tmp/{{ name }}"
+    rm -rf "$out"
+    mkdir -p "$out/src" "$out/tests" "$out/docs" "$out/context"
+    git diff "{{ base }}..HEAD" > "$out/full.diff"
+    flat() { printf '%s' "${1//\//__}.txt"; }
+    while IFS= read -r f; do
+      [ -f "$f" ] || continue
+      case "$f" in
+        *_tommy.go) ;;
+        *_test.go) cp "$f" "$out/tests/$(flat "$f")" ;;
+        *.go) cp "$f" "$out/src/$(flat "$f")" ;;
+        *) cp "$f" "$out/docs/$(flat "$f")" ;;
+      esac
+    done < <(git diff --name-only "{{ base }}..HEAD")
+    for f in {{ context }}; do
+      [ -f "$f" ] && cp "$f" "$out/context/$(flat "$f")"
+    done
+    echo "package at $out: $(ls "$out/src" | wc -l) sources, $(ls "$out/tests" | wc -l) tests, $(ls "$out/docs" | wc -l) docs, $(ls "$out/context" | wc -l) context files, $(wc -l < "$out/full.diff") diff lines"
