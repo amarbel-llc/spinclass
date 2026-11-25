@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/charlie/keyholdersweep"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
@@ -15,6 +16,10 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// No test of this package may look at, let alone stop, the host's real key
+	// holder pairs: the sweep is stubbed unless a test installs its own.
+	findKeyholderOrphans = func() []keyholdersweep.Pair { return nil }
+	stopKeyholderOrphan = func(keyholdersweep.Pair) error { return nil }
 	code := m.Run()
 	cleanup()
 	os.Exit(code)
