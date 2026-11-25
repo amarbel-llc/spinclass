@@ -192,8 +192,31 @@ type unitSpec struct {
 	DenyPaths    []string     `json:"deny_paths"`
 	// EgressAllow is a pointer so "unset" (omitted: clown's own default list
 	// applies) differs from an explicit empty list (deny everything).
-	EgressAllow *[]string         `json:"egress_allow,omitempty"`
-	Env         map[string]string `json:"env"`
+	EgressAllow *[]string `json:"egress_allow,omitempty"`
+	// Bridge is the clown launch-spec `bridge` field (docs/plans/2026-11-25-
+	// bridge-wire-v1.md, launcher section): omitted = clown's default
+	// ("offered"); "required" refuses the launch when the bridge cannot be set up.
+	Bridge BridgeMode        `json:"bridge,omitempty"`
+	Env    map[string]string `json:"env"`
+}
+
+// BridgeMode is the value of the launch spec's `bridge` field: unset (the
+// field is omitted and clown's default applies), "offered" or "required".
+type BridgeMode string
+
+const (
+	BridgeUnset    BridgeMode = ""
+	BridgeOffered  BridgeMode = "offered"
+	BridgeRequired BridgeMode = "required"
+)
+
+// Validate refuses any value clown would not parse.
+func (m BridgeMode) Validate() error {
+	switch m {
+	case BridgeUnset, BridgeOffered, BridgeRequired:
+		return nil
+	}
+	return fmt.Errorf("bridge mode %q: want unset, %q or %q", string(m), string(BridgeOffered), string(BridgeRequired))
 }
 
 // unitSpecInput is everything buildUnitSpec needs, resolved by the caller so
@@ -208,7 +231,8 @@ type unitSpecInput struct {
 	wayland      []string // existing wayland-* entries under runtimeDir
 	egress       []string
 	env          map[string]string
-	handshakeDir string // per-session hello dir, bound rw; "" binds nothing
+	bridge       BridgeMode // launch-spec `bridge`; BridgeUnset omits the field
+	handshakeDir string     // per-session hello dir, bound rw; "" binds nothing
 	// harnessConfigWritable is the trusted [confinement] harness-config-writable
 	// opt-in (#400): when false, <worktree>/.claude and <worktree>/.mcp.json are
 	// read-only binds.
@@ -271,7 +295,8 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 			filepath.Join(in.runtimeDir, "posh"),
 			"/tmp/.X11-unix",
 		}, in.wayland...),
-		Env: in.env,
+		Env:    in.env,
+		Bridge: in.bridge,
 	}
 	// The minted credential is not in the unit's tree at all: auth writes it
 	// to frontend state (confinement.CredentialPath), hidden by ProtectHome, and
@@ -580,6 +605,9 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 		harnessConfigWritable: harnessConfigWritable, harnessRootFiles: rootFiles,
 	})
 	if err := refuseProtectedBinds(spec, stateDir); err != nil {
+		return "", err
+	}
+	if err := spec.Bridge.Validate(); err != nil {
 		return "", err
 	}
 	path, err := confinement.WriteUnitSpec(stateDir, rp.AbsPath, spec)

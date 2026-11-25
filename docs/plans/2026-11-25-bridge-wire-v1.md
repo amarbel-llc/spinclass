@@ -261,6 +261,16 @@ These are what clown MUST do for the listener's checks to mean anything:
    sets no `CLOWN_BRIDGE_SOCKET` and advertises no `bridge-v1`; the launch goes
    on.
 
+The launch spec carries an optional field `bridge`, written by the frontend
+(spinclass, `internal/foxtrot/spawn/confine.go`, type `BridgeMode`). Its values:
+unset (the field is omitted) or `"offered"` (the default: the launch goes on
+without a bridge when one cannot be set up, and clown's result says
+`bridge: off:<reason>`), or `"required"` (clown refuses the launch when the
+bridge cannot be set up). Any other value is refused by both sides. The default
+stays `"offered"`; making `"required"` the default is the operator's switch, not
+a code change. Today the frontend leaves the field unset: no sweatfile knob sets
+it yet.
+
 Inside the unit: `CLOWN_BRIDGE_SOCKET` is the socket's path (the same path as
 outside), the shim's flag is `--bridge SOCK`, and clown advertises the result
 capability `bridge-v1` only once the cgroup file was written. A view unit refuses
