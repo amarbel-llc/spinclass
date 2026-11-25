@@ -254,7 +254,7 @@ func TestSessionKeyRefusesAKeyTheHolderDidNotMintAndAnythingNotACleanKeyLine(t *
 		{"an escape sequence in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:\x1b[31mred", "", "", "control character"},
 		{"a carriage return in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:a\rb", "", "", "control character"},
 		{"a tab in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:a\tb", "", "", "control character"},
-		{"a right-to-left override in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:‮", "", "", "control character"},
+		{"a right-to-left override in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:\xe2\x80\xae", "", "", "control character"},
 		{"a line longer than 4 KiB", long, "", "", "longer than"},
 		{"an rsa key", "ssh-rsa AAAAC3NzaFAKEAAA holder:reader", "", "", "key type"},
 		{"a sk key", "sk-ssh-ed25519@openssh.com AAAAC3NzaFAKEAAA holder:reader", "", "", "key type"},
