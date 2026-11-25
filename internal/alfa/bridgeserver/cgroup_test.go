@@ -110,10 +110,17 @@ func TestReadCgroupFileAcceptsOnlyTheExactPath(t *testing.T) {
 	if err != nil || got != testCgroup {
 		t.Fatalf("ReadCgroupFile = %q, %v", got, err)
 	}
+	// One trailing newline is tolerated on read (the shared admission vectors);
+	// writers MUST NOT write one, and clown writes none.
+	if got, err := ReadCgroupFile(writeCgroupFile(t, testCgroup+"\n")); err != nil || got != testCgroup {
+		t.Errorf("a file with one trailing newline: ReadCgroupFile = %q, %v; want the path", got, err)
+	}
 	for name, content := range map[string]string{
 		"empty":             "",
 		"root":              "/",
-		"trailing newline":  testCgroup + "\n",
+		"two newlines":      testCgroup + "\n\n",
+		"only a newline":    "\n",
+		"newline then text": testCgroup + "\n/x",
 		"trailing slash":    testCgroup + "/",
 		"relative":          "user.slice/x.service",
 		"dot dot":           "/a/../b",
@@ -159,7 +166,7 @@ func TestPeerIsRefusedWhileTheCgroupFileIsMissingOrInvalid(t *testing.T) {
 	cases := map[string]string{
 		"missing":          filepath.Join(shortDir(t), "never-written"),
 		"empty":            writeCgroupFile(t, ""),
-		"trailing newline": writeCgroupFile(t, testCgroup+"\n"),
+		"two newlines":     writeCgroupFile(t, testCgroup+"\n\n"),
 		"relative":         writeCgroupFile(t, "not/absolute"),
 		"mode 0644":        loose,
 		"symlink":          link,

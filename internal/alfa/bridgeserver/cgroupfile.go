@@ -43,7 +43,8 @@ func checkCgroupFilePath(dir, file string) error {
 // ReadCgroupFile reads the unit's cgroup path from the file clown wrote. It
 // opens without following a link and accepts only a regular file of this uid
 // that nobody else can read or write, holding exactly an absolute, clean,
-// control-free path with no trailing newline. Anything else is an error (the
+// control-free path, optionally followed by ONE newline (writers write none).
+// Anything else is an error (the
 // listener then admits nobody); a missing file is an error wrapping
 // fs.ErrNotExist.
 func ReadCgroupFile(path string) (string, error) {
@@ -72,13 +73,16 @@ func ReadCgroupFile(path string) (string, error) {
 	if len(b) > maxCgroupFileBytes {
 		return "", fmt.Errorf("bridge: cgroup file %s is over %d bytes", path, maxCgroupFileBytes)
 	}
-	cg := string(b)
+	// One trailing newline is tolerated (the shared admission vectors); a
+	// writer MUST NOT write one, and clown writes none. A second newline, or any
+	// other control character, still refuses below.
+	cg := strings.TrimSuffix(string(b), "\n")
 	if cg == "" || cg == "/" || cg[0] != '/' || filepath.Clean(cg) != cg {
 		return "", fmt.Errorf("bridge: cgroup file %s does not hold one clean absolute cgroup path", path)
 	}
 	for _, r := range cg {
 		if r < 0x20 || r == 0x7f {
-			return "", fmt.Errorf("bridge: cgroup file %s holds a control character (a trailing newline is one)", path)
+			return "", fmt.Errorf("bridge: cgroup file %s holds a control character (one trailing newline is tolerated, a second is not)", path)
 		}
 	}
 	return cg, nil

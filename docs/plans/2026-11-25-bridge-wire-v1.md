@@ -217,8 +217,9 @@ to start and says so.
 The expected cgroup is read from the file named by `CLOWN_BRIDGE_CGROUP_FILE`,
 on every connection, never cached. The file MUST be a regular file (not a link,
 not a FIFO) owned by the session's user, mode 0600, outside the bridge
-directory, and its content is exactly the cgroup path with no trailing newline.
-Until the file is valid the listener admits nobody, and the answer to a peer it
+directory, and its content is exactly the cgroup path. A writer MUST NOT write
+a trailing newline (clown writes none); the reader tolerates exactly ONE
+trailing newline and refuses two, or any other control character. Until the file is valid the listener admits nobody, and the answer to a peer it
 cannot yet admit (the file missing, empty, unreadable or not as above, or a
 peer outside the cgroup) is `ERR refused <text>` and nothing else: the shim
 retries `refused` and a different code would end its retry. The text names the
@@ -438,11 +439,8 @@ Spinclass runs it through its own file reader and admission path
 (`internal/alfa/bridgeserver`, `TestAdmissionVectors`), with strict equality
 standing in for clown's `CheckPeerExact`.
 
-Spinclass does not yet pass one case, and says so instead of editing the file:
-"one trailing newline is tolerated" expects a file holding the path plus one
-newline to admit, while this contract (Admission, above) has the file hold
-exactly the path with NO trailing newline and the reader refuses a newline as a
-control character. Clown writes no newline, so the two agree on every file clown
-produces; the disagreement is only about a hand-written file. It stays a listed
-known disagreement in the test until the two sides settle which rule is the
-contract.
+Spinclass passes all 21 cases. The shared vectors decide the one place the two
+sides first differed: a file holding the path plus exactly one trailing newline
+admits ("one trailing newline is tolerated"); two newlines, or any other control
+character, refuse. The writer rule is unchanged: a writer MUST NOT write a
+trailing newline, and clown writes none.

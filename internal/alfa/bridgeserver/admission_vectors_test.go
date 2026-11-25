@@ -29,14 +29,6 @@ type admitVector struct {
 	Steps []admitStep `json:"steps"`
 }
 
-// knownDisagreements are cases where this listener answers differently from the
-// vector. The vectors are not edited to hide a disagreement: each entry is the
-// reason, and the test fails if the disagreement goes away without the entry
-// being removed.
-var knownDisagreements = map[string]string{
-	"one trailing newline is tolerated": "the contract (docs/plans/2026-11-25-bridge-wire-v1.md, Admission) says the file holds exactly the cgroup path with NO trailing newline, and ReadCgroupFile refuses a newline as a control character",
-}
-
 func placeCgroupFile(t *testing.T, path, spec string) {
 	t.Helper()
 	_ = os.RemoveAll(path)
@@ -99,7 +91,6 @@ func TestAdmissionVectors(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	seen := map[string]bool{}
 	for _, v := range vs {
 		t.Run(v.Name, func(t *testing.T) {
 			path := filepath.Join(shortDir(t), "bridge.cgroup")
@@ -115,29 +106,14 @@ func TestAdmissionVectors(t *testing.T) {
 					return nil
 				},
 			}}
-			disagrees := false
 			for i, st := range v.Steps {
 				placeCgroupFile(t, path, st.File)
 				peer = st.Peer
 				_, err := s.checkPeer(conn)
 				if (err == nil) != st.Admit {
-					disagrees = true
-					if _, known := knownDisagreements[v.Name]; !known {
-						t.Errorf("step %d (file %q, peer %q): err = %v, want admit=%v", i, st.File, st.Peer, err, st.Admit)
-					}
-				}
-			}
-			if reason, known := knownDisagreements[v.Name]; known {
-				seen[v.Name] = true
-				if !disagrees {
-					t.Errorf("%q is listed as a known disagreement (%s) but now agrees: remove the entry", v.Name, reason)
+					t.Errorf("step %d (file %q, peer %q): err = %v, want admit=%v", i, st.File, st.Peer, err, st.Admit)
 				}
 			}
 		})
-	}
-	for name := range knownDisagreements {
-		if !seen[name] {
-			t.Errorf("known disagreement %q names no vector", name)
-		}
 	}
 }
