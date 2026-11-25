@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
-	"code.linenisgreat.com/spinclass/internal/charlie/keyholdersweep"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 )
 
 // stopFixture stands a fake runner and a short keyholder root in for the real

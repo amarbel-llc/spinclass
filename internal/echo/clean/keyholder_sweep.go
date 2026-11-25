@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"code.linenisgreat.com/spinclass/internal/charlie/keyholdersweep"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 	"github.com/charmbracelet/log"

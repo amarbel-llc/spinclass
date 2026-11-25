@@ -12,7 +12,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
-	"code.linenisgreat.com/spinclass/internal/charlie/keyholdersweep"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 )
 
 // keyholderStopJournal is where each pair this command stops is recorded: an

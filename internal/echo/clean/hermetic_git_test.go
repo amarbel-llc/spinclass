@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/charlie/keyholdersweep"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 

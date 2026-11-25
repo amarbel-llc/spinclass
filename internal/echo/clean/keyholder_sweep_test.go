@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
-	"code.linenisgreat.com/spinclass/internal/charlie/keyholdersweep"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 )
 
 func khOrphan(hash string) keyholdersweep.Pair {
