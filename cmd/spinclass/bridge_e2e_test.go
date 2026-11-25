@@ -15,13 +15,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -46,8 +43,6 @@ const (
 	// A UUID: restart-this-session refuses any other shape of principal.
 	e2ePrincipal = "7a1c93d2-4b58-4e0a-9f26-3c8d51e7b0a4"
 	e2eUnit      = "agent.service"
-	// e2eVictim is the session every forgery below tries to act as.
-	e2eVictim = "victim/session"
 	// e2eMaxRequestLine is the bound the contract puts on one request line of the
 	// session service (the brief's 1 MiB).
 	e2eMaxRequestLine = 1 << 20
@@ -227,8 +222,15 @@ func (b *e2eBridge) whoami(p *sessionPeer, args map[string]any) string {
 
 func (b *e2eBridge) wantThisSession(text string) {
 	b.t.Helper()
-	if !strings.Contains(text, "session_key: "+sessionTestKey+"\n") || !strings.Contains(text, "principal: "+e2ePrincipal+"\n") {
-		b.t.Errorf("not this session's identity:\n%s", text)
+	b.wantIdentity(text, sessionTestKey, e2ePrincipal)
+}
+
+// wantIdentity says a whoami answer is for the session key and principal given,
+// and carries nothing of the forgeries the tests send.
+func (b *e2eBridge) wantIdentity(text, key, principal string) {
+	b.t.Helper()
+	if !strings.Contains(text, "session_key: "+key+"\n") || !strings.Contains(text, "principal: "+principal+"\n") {
+		b.t.Errorf("not %s's identity (%s):\n%s", key, principal, text)
 	}
 	if strings.Contains(text, "victim") || strings.Contains(text, "forged") {
 		b.t.Errorf("a forged identity reached the answer:\n%s", text)
@@ -296,98 +298,131 @@ func TestE2EHappyPath(t *testing.T) {
 	b.waitMetric("spinclass.bridge.session.ok:1|c")
 }
 
-// 2. A forged principal: nothing the peer sends names whose session is acted
-// on. The identity is the listener's; the victim's record is not touched.
+// 2. A forged principal: nothing the peer sends, and nothing in the serve's
+// environment or the principals/ mapping file, names whose session is acted on.
+//
+// Two real sessions: A, the one the listener was built for, and B, the victim.
+// The environment (CLOWN_SESSION_ID, SPINCLASS_SESSION_ID) names B, and A's
+// principal mapping file names B's session. A bridged restart-this-session and
+// close-this-session must then succeed, positively, on A: the restart hand-off
+// is run for A's principal in A's worktree and A's record carries the request;
+// cancel-restart (own form) cancels A's; whoami and list-handles answer for A.
+// B's record and principal mapping are byte for byte what they were, and every
+// argument naming B (session, principal, child, target, session_key) changes
+// nothing.
+//
+// How it could fail: a verb that resolves the session through the environment's
+// principal or the mapping file acts on B (a hand-off for B's principal, B's
+// record queued, A's untouched) and the assertions below name which.
 func TestE2EForgedPrincipalNeverChangesWhoseSessionIsActedOn(t *testing.T) {
-	b := startE2E(t, e2eOpts{})
-	victimRecord := filepath.Join(b.state, "spinclass", "records", "victim-session", "record.json")
-	if err := os.MkdirAll(filepath.Dir(victimRecord), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(victimRecord, []byte(`{"victim":true}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	before := snapshotTree(t, filepath.Join(b.state, "spinclass", "records"))
+	b := startE2E(t, e2eOpts{liars: true})
+	f := b.liars
+	beforeB := f.b.fingerprint(t)
 
+	// Every field a verb might read, naming the victim.
 	forged := map[string]any{
-		"session": e2eVictim, "principal": e2eVictim, "child": e2eVictim,
-		"target": e2eVictim, "session_key": e2eVictim,
+		"session": f.b.key, "principal": f.b.principal, "child": f.b.key,
+		"target": f.b.key, "session_key": f.b.key,
+	}
+	// The own forms of cancel-restart take no child.
+	forgedOwn := map[string]any{
+		"session": f.b.key, "principal": f.b.principal,
+		"target": f.b.key, "session_key": f.b.key,
 	}
 	p := b.open("session")
 	p.initialize(protocol.ProtocolVersionV0)
+	call := func(name string, args map[string]any) rpcReply {
+		return p.call("tools/call", map[string]any{"name": name, "arguments": args})
+	}
+	wantOK := func(name string, args map[string]any, contains string) string {
+		t.Helper()
+		text, isErr := p.toolText(call(name, args))
+		if isErr || !strings.Contains(text, contains) {
+			t.Fatalf("%s: isErr=%v %q, want success containing %q", name, isErr, text, contains)
+		}
+		return text
+	}
 
-	b.wantThisSession(b.whoami(p, forged))
-	// The request envelope claiming an identity is not an identity either.
+	// whoami and list-handles answer for A (A holds a handle on B; B's principal,
+	// the environment's, holds none), whatever the arguments or the envelope say.
+	b.wantIdentity(b.whoami(p, forged), f.a.key, f.a.principal)
 	rep := p.call("tools/call", map[string]any{
 		"name": "whoami", "arguments": forged,
-		"session": e2eVictim, "principal": e2eVictim, "_meta": map[string]any{"session": e2eVictim},
+		"session": f.b.key, "principal": f.b.principal, "_meta": map[string]any{"session": f.b.key},
 	})
 	text, _ := p.toolText(rep)
-	b.wantThisSession(text)
+	b.wantIdentity(text, f.a.key, f.a.principal)
+	wantOK("list-handles", forged, "held    "+f.b.key)
 
-	// Every verb, with the forgery: the ones the bridge refuses are refused
-	// (-32001) whoever the arguments name.
-	for _, tool := range []string{"cancel-restart"} {
-		rep := p.call("tools/call", map[string]any{"name": tool, "arguments": forged})
-		if rep.Error == nil || rep.Error.Code != -32001 {
-			t.Errorf("%s with forged names: want -32001, got %+v result %s", tool, rep.Error, rep.Result)
-		}
+	// restart-this-session acts on A.
+	wantOK("restart-this-session", forged, "restart queued for "+f.a.key)
+	calls := *f.handoff
+	if len(calls) != 1 {
+		t.Fatalf("hand-off calls = %+v, want exactly one", calls)
 	}
-	// The open verbs and the ones that act on "this session" ignore the names;
-	// whatever they answer, it is about this session or an error, never the victim.
-	for _, tool := range []string{"list-handles", "restart-this-session", "close-this-session"} {
-		rep := p.call("tools/call", map[string]any{"name": tool, "arguments": forged})
-		var reply string
-		if rep.Error != nil {
-			reply = rep.Error.Message
-		} else {
-			reply = string(rep.Result)
-		}
-		if strings.Contains(reply, e2eVictim) {
-			t.Errorf("%s answered with the forged session: %s", tool, reply)
-		}
+	argv := strings.Join(calls[0].argv, " ")
+	if calls[0].dir != f.a.wt || !strings.Contains(argv, "--session "+f.a.principal+" ") || strings.Contains(argv, f.b.principal) {
+		t.Errorf("the hand-off ran %+v; want A's worktree %s and A's principal %s only", calls[0], f.a.wt, f.a.principal)
 	}
+	if rr := f.a.record(t).RestartRequest; rr == nil || rr.Requester != f.a.principal {
+		t.Errorf("A's record does not carry its own restart request: %+v", rr)
+	}
+
+	// cancel-restart (own form) cancels A's request; naming B is refused.
+	wantOK("cancel-restart", forgedOwn, "cancelled the queued restart of "+f.a.key)
+	if f.a.record(t).RestartRequest != nil {
+		t.Error("A's restart request survived its own cancel")
+	}
+	if rep := call("cancel-restart", forged); rep.Error == nil || rep.Error.Code != -32001 || rep.Error.Message != refusalCancelRestart {
+		t.Errorf("cancel-restart naming a child: %+v, want -32001 %q", rep.Error, refusalCancelRestart)
+	}
+
+	// close-this-session acts on A.
+	wantOK("close-this-session", forged, "close queued for "+f.a.key)
+	if cr := f.a.record(t).CloseRequest; cr == nil || cr.Principal != f.a.principal {
+		t.Errorf("A's record does not carry its own close request: %+v", cr)
+	}
+
+	// B: no hand-off for it, no request on it, record and mapping untouched.
+	if len(*f.handoff) != 1 {
+		t.Errorf("a further hand-off ran: %+v", *f.handoff)
+	}
+	f.wantBUntouched(t, beforeB)
 
 	// Stream-level forgeries: a header-looking line, a second hello and a bare
 	// identity object after OK are service bytes, not identity.
-	noise := "X-Bridge-Session: " + e2eVictim + "\nBRIDGE/1 session\n{\"principal\":\"" + e2eVictim + "\",\"session\":\"" + e2eVictim + "\"}\n"
+	noise := "X-Bridge-Session: " + f.b.key + "\nBRIDGE/1 session\n{\"principal\":\"" + f.b.principal + "\",\"session\":\"" + f.b.key + "\"}\n"
 	if _, err := p.conn.Write([]byte(noise)); err != nil {
 		t.Fatal(err)
 	}
-	b.wantThisSession(whoamiSkippingNoise(t, p))
+	b.wantIdentity(whoamiSkippingNoise(t, p, f.a.key, f.a.principal), f.a.key, f.a.principal)
 	// And a fresh stream is this session too.
-	b.wantThisSession(b.whoami(func() *sessionPeer { q := b.open("session"); q.initialize(protocol.ProtocolVersionV0); return q }(), forged))
+	b.wantIdentity(b.whoami(func() *sessionPeer { q := b.open("session"); q.initialize(protocol.ProtocolVersionV0); return q }(), forged), f.a.key, f.a.principal)
 
 	// Before the hello, the same lines are a malformed hello and nothing more.
-	if got := b.exchange("X-Bridge-Session: " + e2eVictim + "\nBRIDGE/1 session\n"); got != string(bridge.MalformedReply()) {
+	if got := b.exchange("X-Bridge-Session: " + f.b.key + "\nBRIDGE/1 session\n"); got != string(bridge.MalformedReply()) {
 		t.Errorf("identity header before the hello: reply %q", got)
 	}
-
-	after := snapshotTree(t, filepath.Join(b.state, "spinclass", "records"))
-	if !equalSnapshots(before, after) {
-		t.Errorf("the session records changed:\nbefore %v\nafter  %v", before, after)
-	}
-	if got, err := os.ReadFile(victimRecord); err != nil || string(got) != `{"victim":true}` {
-		t.Errorf("the victim's record = %q %v", got, err)
-	}
+	f.wantBUntouched(t, beforeB)
 }
 
 // whoamiSkippingNoise asks whoami on a stream that has just been fed garbage
 // lines: the server may answer them with errors or end the stream; either way
 // no garbage line may have set an identity. A stream that ended falls back to
 // the caller's second check (a fresh stream).
-func whoamiSkippingNoise(t *testing.T, p *sessionPeer) string {
+func whoamiSkippingNoise(t *testing.T, p *sessionPeer, key, principal string) string {
 	t.Helper()
+	ended := "session_key: " + key + "\nprincipal: " + principal + "\n"
 	p.next++
 	id := p.next
 	req, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": map[string]any{"name": "whoami", "arguments": map[string]any{}}})
 	if _, err := p.conn.Write(append(req, '\n')); err != nil {
-		return "session_key: " + sessionTestKey + "\nprincipal: " + e2ePrincipal + "\n" // stream ended: nothing was served on it
+		return ended // stream ended: nothing was served on it
 	}
 	for i := 0; i < 20; i++ {
 		line, err := p.r.ReadBytes('\n')
 		if err != nil {
-			return "session_key: " + sessionTestKey + "\nprincipal: " + e2ePrincipal + "\n" // stream ended
+			return ended // stream ended
 		}
 		var rep rpcReply
 		if json.Unmarshal(line, &rep) != nil || string(rep.ID) != fmt.Sprint(id) {
@@ -404,38 +439,6 @@ func whoamiSkippingNoise(t *testing.T, p *sessionPeer) string {
 // close with unread input resets a unix socket instead of a clean EOF).
 func streamEnded(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
-}
-
-func snapshotTree(t *testing.T, root string) map[string]string {
-	t.Helper()
-	out := map[string]string{}
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		b, rerr := os.ReadFile(path)
-		fi, serr := d.Info()
-		if rerr != nil || serr != nil {
-			out[path] = "unreadable"
-			return nil
-		}
-		sum := sha256.Sum256(b)
-		out[path] = hex.EncodeToString(sum[:]) + fmt.Sprint(fi.ModTime().UnixNano())
-		return nil
-	})
-	return out
-}
-
-func equalSnapshots(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
 }
 
 // 3. A peer outside the unit, or a check that cannot tell, is refused with the
