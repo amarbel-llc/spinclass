@@ -1977,6 +1977,85 @@ explore-guarded-gate-inputs-eval:
 debug-sleep seconds='900':
     sleep {{ seconds }}
 
+# Key holder probe A (docs: the per-session key holder design note): start a throwaway fibby HOLDER build plus
+# `piggy agent --holder` (scope `any`) under .tmp, mint a key (no card, no PIN: a virtual card), list it with
+# ssh-add -L, sign and verify one message, then test whether a certificate from a throwaway CA can be offered
+# through the holder and verified the way hogtie verifies (`-Y verify ... namespaces="hogtie-v1"`). Prints one
+# `probe:` line per step with its exit status and never touches a real card or the operator's agent. FIBBY and
+# PIGGY default to the store paths found on this host; TIMEOUT bounds every external command (seconds).
+#
+# probe a throwaway fibby holder plus piggy holder agent: mint, sign, certificate offer, verify (no card)
+[group("debug")]
+debug-keyholder-probe fibby="" piggy="" timeout="60":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    to() { timeout "{{ timeout }}" "$@"; }
+    say() { printf 'probe: %s\n' "$*"; }
+    piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(command -v piggy)" || { say "no piggy on PATH"; exit 1; }
+    fibby="{{ fibby }}"
+    if [ -z "$fibby" ]; then
+      for c in /nix/store/*-fibby-holder-0.1.0/bin/fibby; do fibby="$c"; done
+    fi
+    [ -x "$fibby" ] || { say "no fibby holder build found"; exit 1; }
+    say "piggy=$piggy ($("$piggy" --version 2>&1 | head -1))"
+    say "fibby=$fibby"
+    base="$(mktemp -d "$PWD/.tmp/kh-probe.XXXXXX")"
+    chmod 0700 "$base"
+    mkdir -m 0700 "$base/fibby" "$base/agent" "$base/work"
+    ctl="$base/fibby/ctl.sock"; pcsc="$base/fibby/pcscd.comm"; agent="$base/agent/agent.sock"
+    # a PIN prompt anywhere is a failure, not a question
+    printf '#!/bin/sh\necho "REFUSING to prompt" >&2\nexit 1\n' >"$base/askpass"; chmod 0700 "$base/askpass"
+    export SSH_ASKPASS="$base/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="" PCSCLITE_CSOCK_NAME="$pcsc"
+    unset WAYLAND_DISPLAY SSH_AUTH_SOCK PIGGY_AUTH_SOCK
+    pids=()
+    cleanup() {
+      kill "${pids[@]}" 2>/dev/null || true
+      sleep 1
+      left="$(pgrep -f "$base" || true)"
+      if [ -n "$left" ]; then say "LEFTOVER processes naming $base: $left"; else say "no leftover process names $base"; fi
+      rm -rf "$base"
+    }
+    trap cleanup EXIT
+    "$fibby" --socket "$pcsc" --control-socket "$ctl" --model yk5.7 >"$base/fibby.log" 2>&1 &
+    pids+=($!)
+    for _ in $(seq 1 50); do [ -S "$ctl" ] && [ -S "$pcsc" ] && break; sleep 0.1; done
+    say "fibby profile: $(to "$fibby" ctl --socket "$ctl" profile 2>&1)"
+    to "$fibby" ctl --socket "$ctl" destroy "Virtual PCD piggy fibby 00 00" >/dev/null 2>&1 || true
+    "$piggy" agent --holder --holder-fibby-ctl "$ctl" --scope probe-v1=any -a "$agent" >"$base/agent.log" 2>&1 &
+    pids+=($!)
+    for _ in $(seq 1 50); do [ -S "$agent" ] && break; sleep 0.1; done
+    [ -S "$agent" ] || { say "agent socket never appeared"; sed 's/^/agent.log: /' "$base/agent.log"; exit 1; }
+    say "socket dirs: fibby $(stat -c '%a %U' "$base/fibby") agent $(stat -c '%a %U' "$base/agent") socket $(stat -c '%a' "$agent")"
+    export SSH_AUTH_SOCK="$agent"
+    cd "$base/work"
+    to "$piggy" holder mint --scope probe-v1 >holder.pub 2>mint.err; rc=$?
+    say "mint rc=$rc pub: $(cat holder.pub) err: $(head -c 300 mint.err)"
+    [ "$rc" = 0 ] || { sed 's/^/agent.log: /' "$base/agent.log"; exit 1; }
+    say "ssh-add -L: $(to ssh-add -L 2>&1)"
+    say "fingerprint: $(ssh-keygen -lf holder.pub 2>&1)"
+    say "public key line: $(awk '{print NF " fields, type=" $1 ", comment=" $3}' holder.pub)"
+    echo "probe-a message" >msg
+    to ssh-keygen -Y sign -U -f holder.pub -n probe msg >sign.out 2>&1; say "sign (plain key) rc=$? $(head -c 200 sign.out)"
+    read -r t k _ <holder.pub; printf 'probe %s %s\n' "$t" "$k" >signers
+    to ssh-keygen -Y verify -f signers -I probe -n probe -s msg.sig <msg >verify.out 2>&1; say "verify (plain key) rc=$? $(head -c 200 verify.out)"
+    # certificate: a throwaway CA, a certificate for the holder's key
+    ssh-keygen -q -t ed25519 -N '' -f ca -C probe-ca >/dev/null
+    ssh-keygen -q -s ca -I probe-cert -n flic:restic-snapshots -V +1h holder.pub 2>cert.err; say "cert sign rc=$? $(head -c 200 cert.err)"
+    ssh-keygen -L -f holder-cert.pub 2>&1 | sed -n 's/^ *\(Type\|Public key\|Key ID\|Valid\|Principals\).*/probe: cert: &/p'
+    say "ssh-add of the certificate: $(to ssh-add holder-cert.pub 2>&1) rc=$?"
+    say "ssh-add -L after: $(to ssh-add -L 2>&1)"
+    echo "probe-a hogtie message" >hmsg
+    to ssh-keygen -Y sign -U -f holder-cert.pub -n hogtie-v1 hmsg >csign.out 2>&1; crc=$?
+    say "sign with the certificate (-U -f holder-cert.pub) rc=$crc $(head -c 300 csign.out)"
+    printf '* cert-authority,namespaces="hogtie-v1" %s\n' "$(cut -d' ' -f1,2 ca.pub)" >allowed
+    to ssh-keygen -Y verify -f allowed -I flic:restic-snapshots -n hogtie-v1 -s hmsg.sig <hmsg >cverify.out 2>&1
+    say "verify like hogtie (cert-authority, -I host:action, namespace hogtie-v1) rc=$? $(head -c 300 cverify.out)"
+    if [ -s hmsg.sig ]; then
+      say "signature embeds: $(ssh-keygen -Y check-novalidate -n hogtie-v1 -s hmsg.sig <hmsg 2>&1 | head -c 200)"
+    fi
+    say "agent.log tail:"; tail -n 8 "$base/agent.log" | sed 's/^/probe:   /'
+
 # [explore] Poll a worker's record every few seconds and print ONE line per change
 # (UTC time, request queued, restarting_at, restarted_at, claude pid, recorded pid,
 # peek state) until restarted_at is set after restarting_at, or `limit` seconds
