@@ -154,6 +154,18 @@ func (h Health) Note() string {
 	return ""
 }
 
+// HasState reports whether a session has ever been given a pair that is still
+// on record: a pair record or a key history under base. It reads two files and
+// asks systemd nothing, so a caller can skip the sessions that never had one.
+func HasState(base, sessionKey string) bool {
+	for _, p := range []string{filepath.Join(SessionDir(base, sessionKey), "record.json"), LastPath(base, sessionKey)} {
+		if _, err := os.Lstat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // HealthOf reads a session's holder state. It starts and mints nothing.
 func (l *Launcher) HealthOf(ctx context.Context, sessionKey string) (Health, error) {
 	ly := l.layoutFor(sessionKey)

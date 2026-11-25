@@ -35,6 +35,8 @@ type healthDeps struct {
 	JobRunning func(st *session.State) bool
 	// UnitClock is the confined unit's clock (nil or !ok: not confined).
 	UnitClock func(st *session.State) (confinement.UnitClock, bool)
+	// KeyholderNote is the session's key holder line ("" for none; nil: not asked).
+	KeyholderNote func(st *session.State) string
 }
 
 // unitExpirySoon is how little wall clock left flags a unit as expiring.
@@ -90,6 +92,7 @@ func productionHealthDeps() healthDeps {
 		UnitClock: func(st *session.State) (confinement.UnitClock, bool) {
 			return confinement.UnitClockForWorktree(st.WorktreePath)
 		},
+		KeyholderNote: func(st *session.State) string { return keyholderNote(st.Key(), true) },
 		JobRunning: func(st *session.State) bool {
 			j, err := job.Read(st.WorktreePath)
 			return err == nil && j.Status == job.StatusRunning
@@ -178,6 +181,11 @@ func runSessionHealthWith(p sessionHealthParams, caller string, d healthDeps) (s
 		if d.UnitClock != nil {
 			if c, ok := d.UnitClock(s); ok {
 				line += "; " + unitNote(c, ok, d.Now)
+			}
+		}
+		if d.KeyholderNote != nil {
+			if n := d.KeyholderNote(s); n != "" {
+				line += "; " + n
 			}
 		}
 		lines = append(lines, line)

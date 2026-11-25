@@ -673,6 +673,12 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 			return refuse(err.Error())
 		}
 	}
+	// clown relaunches without `sc resume`, so a dead key holder pair is
+	// restarted (and a changed key announced) HERE, before the relaunch: no
+	// restart may bring a session back on a holder socket nothing listens on.
+	if err := keyholderBeforeRestartFn(st, os.Stderr); err != nil {
+		return refuse(keyholderRestartRefusal(st, err))
+	}
 	// The restart is approved. clown relaunches without `sc resume`, so the
 	// frozen per-commit hook is re-frozen here from the landed default branch,
 	// as a resume would (spinclass#475). A failure only warns: the hook never
@@ -898,6 +904,13 @@ func runRestartRearm(target string) (restartVerdict, error) {
 	}
 	if posture == restartPostureAttended && req.Requester == principal {
 		return refuse("a session may not widen its own permissions")
+	}
+	if !stopping {
+		// The same check as the plain preflight: the relaunch this re-arm restores
+		// must not come back on a dead key holder socket.
+		if err := keyholderBeforeRestartFn(st, os.Stderr); err != nil {
+			return refuse(keyholderRestartRefusal(st, err))
+		}
 	}
 
 	// Re-checked under the session lock: a close, a newer request, a return, or

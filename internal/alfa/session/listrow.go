@@ -60,6 +60,12 @@ type ListRow struct {
 	// Profile is the clown profile name the worker was spawned with (FDR 0034),
 	// for `sc list`'s PROFILE column. Appended last and omitempty.
 	Profile string `json:"profile,omitempty"`
+
+	// KeyHolder is the one-line note about the session's key holder when it
+	// needs the operator's attention (a lost pair, a re-minted key with no
+	// certificate yet). Filled by `sc list` from the key holder's own state, not
+	// by ListRowsWithClowns. Appended last and omitempty.
+	KeyHolder string `json:"keyholder,omitempty"`
 }
 
 // ListRows converts states to wire rows with no clown-presence augmentation

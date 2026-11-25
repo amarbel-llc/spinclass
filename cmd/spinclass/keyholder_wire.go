@@ -103,6 +103,11 @@ func keyholderSessionEnvUndo(home, repoPath, sessionKey string, stderr io.Writer
 	if err != nil {
 		return nil, nil, fmt.Errorf("starting the session's key holder: %w", err)
 	}
+	if pair.Reminted != nil {
+		// Every launch, resume, spawn, start hand-off and restart comes through
+		// here, so a lost pair is announced once, in one place.
+		announceKeyholderRemint(l, sessionKey, pair.Reminted, stderr)
+	}
 	kh := map[string]string{"SSH_AUTH_SOCK": pair.AgentSock}
 	// Every other variable that names the operator's agent, set in the launching
 	// process, is emptied for the session (empty is unset to piggy and to ssh).

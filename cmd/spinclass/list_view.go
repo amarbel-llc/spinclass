@@ -404,7 +404,11 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		if !tty {
 			cells = append(cells, serveCell(serves[s.Principal], own))
 		}
-		cells = append(cells, descCell(s.Description, s.SpawnedBy, len(s.Holders), s.Orphan()))
+		desc := s.Description
+		if note := keyholderNoteFn(s.SessionKey); note != "" {
+			desc += " [" + note + "]"
+		}
+		cells = append(cells, descCell(desc, s.SpawnedBy, len(s.Holders), s.Orphan()))
 		t.Row(cells...)
 		if tty {
 			if note := serveNote(serves[s.Principal], own); note != nil {

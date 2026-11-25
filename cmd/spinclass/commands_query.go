@@ -396,7 +396,11 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 				dbg.Debug("remote list diagnostic", "diag", d)
 			}
 		}
-		data, err := json.Marshal(append(session.ListRowsWithClowns(states, closed, counts), remoteRows...))
+		local := session.ListRowsWithClowns(states, closed, counts)
+		for i := range local {
+			local[i].KeyHolder = keyholderNoteFn(local[i].SessionKey)
+		}
+		data, err := json.Marshal(append(local, remoteRows...))
 		if err != nil {
 			return command.TextErrorResult(err.Error()), nil
 		}
@@ -423,7 +427,7 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 		}
 		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s%s%s\n",
 			s.SessionKey, resolved, marker, s.Branch, exited, s.WorktreePath, s.Description,
-			spawnedBySuffix(s.SpawnedBy), holdersSuffix(len(s.Holders), s.Orphan()))
+			spawnedBySuffix(s.SpawnedBy), holdersSuffix(len(s.Holders), s.Orphan())+keyholderSuffix(keyholderNoteFn(s.SessionKey)))
 	}
 	for _, r := range remoteRows {
 		fmt.Fprintf(&b, "%s:%s\t%s\t\t%s\t\t\t%s%s%s\n",
@@ -461,6 +465,18 @@ func holdersSuffix(holders int, orphan bool) string {
 	default:
 		return ""
 	}
+}
+
+// keyholderNoteFn is the key holder note `sc list` shows for a local session
+// ("" when its holder needs nothing); tests replace it.
+var keyholderNoteFn = func(sessionKey string) string { return keyholderNote(sessionKey, false) }
+
+// keyholderSuffix renders the note as one more trailing text column.
+func keyholderSuffix(note string) string {
+	if note == "" {
+		return ""
+	}
+	return "\t" + note
 }
 
 // remotesForCwd returns the [[remotes]] entries from the merged sweatfile
