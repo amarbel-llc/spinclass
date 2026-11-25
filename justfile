@@ -2174,17 +2174,34 @@ debug-keyholder-unit-probe fibby="" piggy="" clown="" clown_rev="f502df21ae7d542
         sockets:[{path:$sock, purpose:"key-holder"}], env:{SSH_AUTH_SOCK:$sock}}' >"$base/spec.json"
     inner='echo "sock=$SSH_AUTH_SOCK"; echo "inside: ssh-add -L:"; ssh-add -L 2>&1 | awk '"'"'{print "  " $1 " " $NF}'"'"'; ssh-add -l 2>&1 | sed "s/^/  fp: /";'
     inner+=' printf hello > '"$wt"'/m; ssh-keygen -Y sign -U -f '"$wt"'/holder.pub -n probe '"$wt"'/m 2>&1 | sed "s/^/  sign: /"; echo "  sign rc=${PIPESTATUS[0]}";'
-    for p in "$operator_sock" "$operator_piggy"; do
-      [ -n "$p" ] || continue
-      inner+=' if test -e '"'$p'"'; then echo OPERATOR-AGENT-VISIBLE; else echo operator-agent-absent; fi;'
-    done
-    [ -n "$operator_sock$operator_piggy" ] || inner+=' echo "operator-agent-path-not-in-outer-env";'
+    # The negative must not be vacuous: enumerate the operator's REAL candidate agent sockets (names of
+    # socket files only, never their contents; none is opened or connected to), hand each path to the unit and
+    # test it there. The run fails if there are no candidates or if any one is visible inside.
+    cand="$wt/candidates.txt"; : >"$cand"
+    for p in "$operator_sock" "$operator_piggy"; do [ -z "$p" ] || printf '%s\n' "$p" >>"$cand"; done
+    rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    {
+      [ -d "$rt" ] && find "$rt" -maxdepth 2 -type s \( -name 'piggy*' -o -name 'ssh*' -o -name '*agent*' -o -name 'S.gpg-agent*' -o -name 'S.gpg*' \) 2>/dev/null
+      [ -d "$HOME/.local/state/ssh" ] && find "$HOME/.local/state/ssh" -maxdepth 2 -type s 2>/dev/null
+      [ -d "$HOME/.local/state/piggy" ] && find "$HOME/.local/state/piggy" -maxdepth 2 -type s 2>/dev/null
+      find /tmp -maxdepth 3 -type s -path '/tmp/ssh-*/agent.*' 2>/dev/null
+    } | grep -v -F "$base" >>"$cand" || true
+    sort -u "$cand" -o "$cand"
+    ncand="$(wc -l <"$cand")"
+    say "operator agent candidates ($ncand; names only, ~ is HOME):"; sed "s#$HOME#~#; s/^/unit-probe:   /" "$cand"
+    if [ "$ncand" -lt 1 ]; then say "FAIL: no operator agent socket candidate exists on this host, so an 'absent' answer would prove nothing"; exit 1; fi
+    inner+=' while IFS= read -r p; do if [ -e "$p" ]; then echo "VISIBLE $p"; else echo "absent $p"; fi; done < '"$cand"';'
     say "running the unit (one run)"
     # agent-scope-run refuses a working directory outside the worktree
     cd "$wt"
-    timeout 300 "$clown/bin/clown" agent-scope-run --spec "$base/spec.json" -- bash -c "$inner" </dev/null 2>&1 | grep -v 'agent scope: environment:' | sed 's/^/unit: /'
+    timeout 300 "$clown/bin/clown" agent-scope-run --spec "$base/spec.json" -- bash -c "$inner" </dev/null 2>&1 | grep -v 'agent scope: environment:' | tee "$base/unit.out" | sed "s#$HOME#~#g; s/^/unit: /"
     rc="${PIPESTATUS[0]}"
     say "agent-scope-run rc=$rc"
+    nvis="$(grep -c '^VISIBLE ' "$base/unit.out" || true)"; nabs="$(grep -c '^absent ' "$base/unit.out" || true)"
+    say "inside the unit: candidates visible=$nvis absent=$nabs of $ncand"
+    if [ "$nvis" != 0 ]; then say "FAIL: an operator agent socket is VISIBLE inside the unit"; grep '^VISIBLE ' "$base/unit.out" | sed "s#$HOME#~#"; exit 2; fi
+    if [ "$nabs" != "$ncand" ]; then say "FAIL: the unit tested $nabs of $ncand candidates (the check did not run to the end)"; exit 1; fi
+    say "NEGATIVE-OK none of $ncand operator agent socket candidates is visible inside the unit"
     [ -f "$base/res/result.json" ] && say "result: $(jq -c '{unit, exit_code, main_pid}' "$base/res/result.json" 2>&1)"
     say "systemctl --user clown-agent units now: $(systemctl --user list-units --all --no-legend 2>/dev/null | grep -c 'clown-agent' || true)"
 
