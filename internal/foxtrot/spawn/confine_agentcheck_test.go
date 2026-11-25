@@ -80,6 +80,29 @@ func TestAStoredSpecBindingTheOperatorsAgentIsRefusedWhenTheSwitchIsOn(t *testin
 	}
 }
 
+// Whatever replaces a stored spec in place (clown's own gate refuses any spec whose
+// boundary digest changed, with the text "a changed spec means a new session"),
+// spinclass's refusal is the same answer made earlier: it says so, and tells the
+// operator exactly what to do. Both directions say it.
+func TestTheRefusalNamesClownsOwnTextAndTheCloseAndRespawnInstruction(t *testing.T) {
+	state, rp := agentCheckFixture(t)
+	writeOffSpec(t, state, rp)
+	errOn := CheckAgentBoundary(state, rp.AbsPath, true)
+	state2, rp2 := agentCheckFixture(t)
+	writeHolderSpec(t, state2, rp2)
+	errOff := CheckAgentBoundary(state2, rp2.AbsPath, false)
+	for name, err := range map[string]error{"switch on": errOn, "switch off": errOff} {
+		if err == nil {
+			t.Fatalf("%s: no refusal", name)
+		}
+		for _, want := range []string{"a changed spec means a new session", "close this session and spawn a new one"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: the refusal does not say %q: %v", name, want, err)
+			}
+		}
+	}
+}
+
 // A spec written with no agent at all (the operator had none when it was spawned)
 // has no holder either: with the switch on the session would come back without
 // its own key, a changed boundary too.

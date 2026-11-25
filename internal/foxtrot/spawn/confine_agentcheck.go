@@ -36,7 +36,7 @@ func (e *AgentBoundaryError) Error() string {
 	if e.SwitchOn {
 		mode = "on"
 	}
-	msg := fmt.Sprintf("the stored unit spec of %s binds %s, but [keyholder] mode is now %q: a changed agent socket is a changed boundary, and clown refuses to relaunch a session whose boundary changed (the operator's agent is never rebound to a session started on its own key, nor a dead holder path to one started without)",
+	msg := fmt.Sprintf("the stored unit spec of %s binds %s, but [keyholder] mode is now %q: a changed agent socket is a changed boundary, and clown refuses to relaunch a session whose boundary changed (its own text is \"a changed spec means a new session\": this is the same refusal, made before clown is called; the operator's agent is never rebound to a session started on its own key, nor a dead holder path to one started without)",
 		e.Worktree, e.Stored, mode)
 	if e.Detail != "" {
 		msg += " (" + e.Detail + ")"
