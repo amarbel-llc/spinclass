@@ -1555,9 +1555,9 @@ values differ, the launch is refused.
 	session's directory under *$XDG_STATE_HOME/spinclass/keyholder/* (mode 0700,
 	holding the fibby and agent sockets, a work directory, the *record.json* that
 	names the units and the minted public key and fingerprint, and the *cert/*
-	directory), and of the *<hash>.lock* file beside it. *sc keyholder-stop --all
-	--dry-run* maps hashes to sessions. The units are started with *systemd-run
-	--user* by absolute store path; spinclass never looks *systemd-run*,
+	directory), and of the *<hash>.lock* file beside it. *sc keyholder-stop --all --dry-run* maps hashes to sessions. The
+	units are started with *systemd-run --user* by absolute store path;
+	spinclass never looks *systemd-run*,
 	*systemctl*, *ssh-add* or *ssh-keygen* up on PATH (spinclass-build-pins(7)).
 
 	*Logs.* The launcher writes to *spinclass/lifecycle.log* under

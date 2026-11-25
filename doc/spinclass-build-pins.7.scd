@@ -153,8 +153,9 @@ never looks any of them up on *PATH*:
   public key with *ssh-add -L*, fingerprints it, and inspects an installed
   certificate with *ssh-keygen -L*.
 - *systemd-run* and *systemctl* (the *systemd* input, *-X main.systemdRunBin*
-  and *-X main.systemctlBin*): the pair is started as transient *systemd-run
-  --user* units and asked about, listed and stopped with *systemctl --user*.
+  and *-X main.systemctlBin*): the pair is started as transient user units by
+  *systemd-run --user*, and asked about, listed and stopped with
+  *systemctl --user*.
 
 Unlike the other pins an empty value here is NOT "resolve the name from
 *PATH*": a build without the pins (a plain *go build*, a test binary, or
