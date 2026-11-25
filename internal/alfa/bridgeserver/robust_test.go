@@ -278,10 +278,14 @@ func TestControlStreamSurvivesThePeersWriteEOFAndEndsWhenThePeerIsGone(t *testin
 	deadline = time.Now().Add(3 * time.Second)
 	for {
 		c2 := dial(t, dir)
-		send(t, c2, "BRIDGE/1 control\n")
+		// While the slot is still held the server answers ERR busy and closes,
+		// so this write may meet a closed peer; that is the retry signal, not a failure.
+		_, _ = c2.Write([]byte("BRIDGE/1 control\n"))
 		_ = c2.SetReadDeadline(time.Now().Add(time.Second))
 		b := make([]byte, 3)
-		if _, err := c2.Read(b); err == nil && string(b) == "OK\n" {
+		_, rerr := c2.Read(b)
+		_ = c2.Close()
+		if rerr == nil && string(b) == "OK\n" {
 			return
 		}
 		if time.Now().After(deadline) {
