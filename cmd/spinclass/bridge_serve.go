@@ -121,7 +121,7 @@ func startBridgeFrom(ctx context.Context, plan bridgePlan, opts bridgeserver.Opt
 	servelog.Infof("serve.bridge listening path=%s unit=%s session=%s", s.Path(), plan.Unit, opts.SessionKey)
 	done := make(chan struct{})
 	go func() {
-		_ = s.Serve(ctx)
+		superviseBridge(ctx, s, opts.SessionKey)
 		close(done)
 	}()
 	return func() {

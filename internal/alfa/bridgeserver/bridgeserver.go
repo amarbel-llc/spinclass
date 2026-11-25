@@ -146,9 +146,16 @@ func EnvConfig(getenv func(string) string) (dir, unit string, ok bool) {
 	return dir, unit, dir != "" && unit != ""
 }
 
+// acceptor is the part of a listener the server uses; tests inject one that
+// fails.
+type acceptor interface {
+	Accept() (net.Conn, error)
+	Close() error
+}
+
 // Server is a listening bridge.
 type Server struct {
-	l    *net.UnixListener
+	l    acceptor
 	path string
 	id   socketID
 	unit string
@@ -360,8 +367,9 @@ func (s *Server) Path() string { return s.path }
 // Refused counts connections refused for coming from outside the unit.
 func (s *Server) Refused() int64 { return s.refused.Load() }
 
-// Serve accepts connections until ctx ends or Close is called. It closes the
-// server on return.
+// Serve accepts connections until ctx ends or Close is called, and returns nil
+// then. It closes the server on return. If the accept loop dies on its own it
+// returns that error (after closing) without logging it.
 func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		select {
@@ -376,8 +384,11 @@ func (s *Server) Serve(ctx context.Context) error {
 			if s.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			s.opts.Logf("bridge accept: %v", err)
-			return err
+			// The accept loop died on its own: close the server so its
+			// socket does not outlive it, and hand the error to the caller,
+			// which is the one that logs and wakes the holders.
+			_ = s.Close()
+			return fmt.Errorf("bridge accept: %w", err)
 		}
 		if !s.track(conn) {
 			_ = conn.Close()
