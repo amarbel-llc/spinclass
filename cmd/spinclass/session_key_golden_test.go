@@ -97,6 +97,9 @@ func TestTheCommandStillWritesTheGoldensByteForByte(t *testing.T) {
 	e := useSessionKeySeams(t)
 	sessionKeyAgentList = func(context.Context, string) ([]byte, error) { return []byte(txt[0] + "\n"), nil }
 	sessionKeyFingerprint = func(context.Context, string) (string, error) { return txt[1], nil }
+	// The fingerprint recorded at the mint is the key's own: the command refuses a
+	// listed key that is any other.
+	e.pair.Fingerprint = txt[1]
 	branch := strings.TrimPrefix(doc.Session, "repo/")
 	sessionKeyFind = func(string) (*session.State, error) {
 		return &session.State{SessionKey: doc.Session, WorktreePath: "/wt/" + branch}, nil

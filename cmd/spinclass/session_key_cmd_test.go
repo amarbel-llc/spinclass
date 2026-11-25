@@ -16,7 +16,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
-const khPub = "ssh-ed25519 AAAAC3NzaFAKE holder:reader"
+const khPub = "ssh-ed25519 AAAAC3NzaFAKEAAA holder:reader"
 
 // khListing is what ssh-keygen -L prints for a certificate of the key whose
 // fingerprint is SHA256:FAKEFP, valid until 2026-11-26T20:00:00 local time.
@@ -43,7 +43,7 @@ func useSessionKeySeams(t *testing.T) *sessionKeyEnv {
 		out: &bytes.Buffer{}, errOut: &bytes.Buffer{}, base: t.TempDir(), sock: "/run/holder/agent.sock", live: true,
 		listing: khListing, now: time.Date(2026, 11, 26, 8, 0, 0, 0, time.Local),
 	}
-	e.pair = keyholder.Pair{AgentSock: e.sock}
+	e.pair = keyholder.Pair{AgentSock: e.sock, Fingerprint: "SHA256:FAKEFP"}
 	oFind, oOut, oErr, oBase, oNow := sessionKeyFind, sessionKeyOut, sessionKeyErr, sessionKeyBase, sessionKeyNow
 	oRun, oList, oFP, oCert := sessionKeyRunning, sessionKeyAgentList, sessionKeyFingerprint, sessionKeyCertList
 	t.Cleanup(func() {
@@ -233,6 +233,89 @@ func TestSessionKeyRefusesASocketThatIsNotASingleKeyHolder(t *testing.T) {
 		}
 		if err := runSessionKey(context.Background(), json.RawMessage(`{"session":"a"}`)); err == nil {
 			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
+// What sc session-key vouches for is the key this pair minted (B-F10, A-M3): the
+// fingerprint recorded at the mint is the truth, and a line the operator will
+// paste or read must be one clean key line of a type spinclass accepts.
+func TestSessionKeyRefusesAKeyTheHolderDidNotMintAndAnythingNotACleanKeyLine(t *testing.T) {
+	long := "ssh-ed25519 AAAAC3NzaFAKEAAA " + strings.Repeat("x", 4100)
+	cases := []struct {
+		name    string
+		listed  string
+		recFP   string // the fingerprint recorded at the mint ("" = keep the harness default)
+		listFP  string // what ssh-keygen says of the listed key ("" = keep)
+		wantErr string
+	}{
+		{"a key whose fingerprint differs from the recorded one", khPub, "SHA256:RECORDED", "", "changed since the pair started"},
+		{"a record with no fingerprint", khPub, "-", "", "no fingerprint recorded"},
+		{"an escape sequence in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:\x1b[31mred", "", "", "control character"},
+		{"a carriage return in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:a\rb", "", "", "control character"},
+		{"a tab in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:a\tb", "", "", "control character"},
+		{"a right-to-left override in the comment", "ssh-ed25519 AAAAC3NzaFAKEAAA holder:‮", "", "", "control character"},
+		{"a line longer than 4 KiB", long, "", "", "longer than"},
+		{"an rsa key", "ssh-rsa AAAAC3NzaFAKEAAA holder:reader", "", "", "key type"},
+		{"a sk key", "sk-ssh-ed25519@openssh.com AAAAC3NzaFAKEAAA holder:reader", "", "", "key type"},
+		{"a key blob that is not base64", "ssh-ed25519 !!!notbase64 holder:reader", "", "", "not base64"},
+		{"a line with no key blob", "ssh-ed25519", "", "", "not a public key line"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := useSessionKeySeams(t)
+			e.makeSessionDir(t, "a")
+			switch c.recFP {
+			case "":
+			case "-":
+				e.pair.Fingerprint = ""
+			default:
+				e.pair.Fingerprint = c.recFP
+			}
+			sessionKeyAgentList = func(context.Context, string) ([]byte, error) { return []byte(c.listed + "\n"), nil }
+			err := runSessionKey(context.Background(), json.RawMessage(`{"session":"a"}`))
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("err = %v, want one containing %q", err, c.wantErr)
+			}
+			if e.out.Len() != 0 {
+				t.Errorf("a refused key was printed: %q", e.out.String())
+			}
+		})
+	}
+}
+
+// A refused listing never reaches ssh-keygen: the hostile line is checked before
+// anything shells out with it on stdin.
+func TestSessionKeyChecksTheLineBeforeHandingItToSSHKeygen(t *testing.T) {
+	e := useSessionKeySeams(t)
+	e.makeSessionDir(t, "a")
+	sessionKeyAgentList = func(context.Context, string) ([]byte, error) {
+		return []byte("ssh-ed25519 AAAAC3NzaFAKEAAA holder:\x1b[2J\n"), nil
+	}
+	called := false
+	sessionKeyFingerprint = func(context.Context, string) (string, error) { called = true; return "SHA256:FAKEFP", nil }
+	if err := runSessionKey(context.Background(), json.RawMessage(`{"session":"a"}`)); err == nil {
+		t.Fatal("a line with an escape sequence was accepted")
+	}
+	if called {
+		t.Error("ssh-keygen was handed a line that failed the check")
+	}
+}
+
+func TestSessionKeyAcceptsEd25519AndNistp256AndPrintsWhatTheHolderHas(t *testing.T) {
+	for _, pub := range []string{
+		"ssh-ed25519 AAAAC3NzaFAKEAAA holder:piggy-holder 1",
+		"ecdsa-sha2-nistp256 AAAAC3NzaFAKEAAA holder:piggy-holder 1",
+	} {
+		e := useSessionKeySeams(t)
+		e.makeSessionDir(t, "a")
+		sessionKeyAgentList = func(context.Context, string) ([]byte, error) { return []byte(pub + "\n"), nil }
+		if err := runSessionKey(context.Background(), json.RawMessage(`{"session":"a"}`)); err != nil {
+			t.Errorf("%q: %v", pub, err)
+			continue
+		}
+		if got, want := e.out.String(), pub+"\nSHA256:FAKEFP\n"; got != want {
+			t.Errorf("output %q, want %q", got, want)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
@@ -117,7 +119,8 @@ func registerSessionKeyCommand(app *command.App) {
 				"With --json: {session, public_key, fingerprint, cert_path, cert_expires, cert_matches_key, cert_problem}; session is always the canonical session key (<repo>/<branch>), whatever form was passed. cert_path is where the certificate is installed (write then rename, into its directory only); " +
 				"cert_expires (UTC) and cert_matches_key are read from the installed file with ssh-keygen and are null until one is installed; cert_problem says why an installed file is unusable. " +
 				"A certificate for another key, an expired one or an unusable one is a warning on stderr; stdout stays the two lines. " +
-				"Fails with exit 1 when the session has no holder or its holder is not running. Never mints and never starts anything.",
+				"Fails with exit 1 when the session has no holder, its holder is not running, the socket lists more than one key, the listed line is not one clean key line (over 4 KiB, a control or format character, a type other than ssh-ed25519 and ecdsa-sha2-nistp256, a blob that is not base64), or the listed key is not the one spinclass recorded when it minted the pair (\"the holder's key changed since the pair started\"). " +
+				"For an unconfined session the printed key is still the session's own claim about its socket (same uid, no boundary); the check against the recorded fingerprint is what stops a replaced or re-minted key from being certified unnoticed. Never mints and never starts anything.",
 		},
 		Params: []command.Param{
 			{Name: "session", Type: command.String, Required: true, Description: "Session key (<repo>/<branch>) or worktree name"},
@@ -162,9 +165,23 @@ func runSessionKey(ctx context.Context, args json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("session-key: %w", err)
 	}
+	// The listed line is what the socket says; it is checked before anything
+	// shells out with it, and before it can reach the operator's terminal.
+	if err := validateKeyLine(pub); err != nil {
+		return fmt.Errorf("session-key: %w", err)
+	}
 	fp, err := sessionKeyFingerprint(ctx, pub)
 	if err != nil {
 		return fmt.Errorf("session-key: fingerprint: %w", err)
+	}
+	// The key spinclass minted when it started this pair is the truth. A socket
+	// that lists another key (a session that retired and minted again over its own
+	// socket, or put its own agent where the holder's was) is not vouched for.
+	if pair.Fingerprint == "" {
+		return fmt.Errorf("session-key: the pair's record carries no fingerprint recorded at the mint, so nothing is vouched for; stop the pair and start it again")
+	}
+	if fp != pair.Fingerprint {
+		return fmt.Errorf("session-key: the holder's key changed since the pair started (listed %s, minted %s): refusing to print it; stop the pair and start it again", fp, pair.Fingerprint)
 	}
 	certPath := keyholder.CertPath(base, key)
 	cert := keyholder.InspectCert(ctx, certPath, fp, sessionKeyCertList, sessionKeyNow())
@@ -209,6 +226,39 @@ func certWarning(c keyholder.CertInfo, fp string) string {
 		return "the installed certificate is unusable: " + c.Problem
 	}
 	return ""
+}
+
+// maxKeyLineBytes bounds the line the holder may list: a real key line is a few
+// hundred bytes, and the line is printed and, in JSON, copied into a document.
+const maxKeyLineBytes = 4096
+
+// validateKeyLine refuses a listed line that is not one clean public key line of
+// a type spinclass accepts: too long, any control or format character (escape
+// sequences, carriage returns, tabs, bidirectional overrides reach the
+// operator's terminal or whatever he pastes it into), a type outside ed25519 and
+// nistp256, or a blob that is not base64.
+func validateKeyLine(pub string) error {
+	if len(pub) > maxKeyLineBytes {
+		return fmt.Errorf("the key line is longer than %d bytes", maxKeyLineBytes)
+	}
+	for _, r := range pub {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return fmt.Errorf("the key line contains a control character (%U)", r)
+		}
+	}
+	f := strings.Fields(pub)
+	if len(f) < 2 {
+		return errors.New("not a public key line (want: type, base64 blob, comment)")
+	}
+	switch f[0] {
+	case "ssh-ed25519", "ecdsa-sha2-nistp256":
+	default:
+		return fmt.Errorf("the key type %q is not ssh-ed25519 or ecdsa-sha2-nistp256", f[0])
+	}
+	if _, err := base64.StdEncoding.DecodeString(f[1]); err != nil {
+		return fmt.Errorf("the key blob is not base64: %w", err)
+	}
+	return nil
 }
 
 // onlyKeyLine returns the single key line `ssh-add -L` printed. A holder lists
