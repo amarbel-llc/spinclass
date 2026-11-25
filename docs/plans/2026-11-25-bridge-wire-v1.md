@@ -199,9 +199,11 @@ refused (-32001) and never falls back to the environment's principal:
 - `refused: this bridge's session has no live frontend record, so there is no session to act on`
 - `refused: this bridge's session record carries no principal yet (the SessionStart stamp is not there), so there is no session to act as`
 
-The frontend does not listen at all unless the principal it serves resolves,
-through the frontend's own mapping, to the key the listener carries; otherwise it
-stays off and the failure is logged and counted.
+The frontend binds at once and does not wait for its own mapping or the unit
+record: neither exists when clown starts serve (see "Start order"). A verb call
+is served only when the frontend's mapping of the serve's principal names the
+key the listener carries; until then it is answered `ERR refused`, and a mapping
+that names ANOTHER session ends the listener.
 
 ## Admission: who may connect
 
@@ -276,6 +278,56 @@ Inside the unit: `CLOWN_BRIDGE_SOCKET` is the socket's path (the same path as
 outside), the shim's flag is `--bridge SOCK`, and clown advertises the result
 capability `bridge-v1` only once the cgroup file was written. A view unit refuses
 a bridge in code.
+
+## Start order
+
+The bridge is brought up in this order. Who creates what, and what each waits
+for, is the contract; a launcher or a frontend that changes it deadlocks (the
+unit record needs the provider, the provider needs the shim's `control`, and
+`control` must not need the record).
+
+1. Clown prepares the bridge directory and the environment
+   (`CLOWN_BRIDGE_DIR`, `CLOWN_BRIDGE_UNIT`, `CLOWN_BRIDGE_CGROUP_FILE`) and
+   starts serve.
+2. Serve binds at once: directory, lock, socket, the exact peer checker. It
+   reads no principal mapping and no unit record. It writes its state file and
+   logs `serve.bridge listening`.
+3. Clown waits up to 10 s for `bridge.sock`, then starts the unit.
+4. Clown writes `bridge.cgroup` when systemd shows the unit's main process
+   settled, before the provider starts.
+5. The shim dials `control` (retry window 15 s on `ERR refused`, `busy` or an
+   unreachable socket). The listener admits it on IDENTITY ALONE: same uid, the
+   cgroup file read fresh, the exact peer check, and the file's value ending in
+   `/clown-agent.slice/<CLOWN_BRIDGE_UNIT>` (the unit comes from the
+   environment; no unit record is read). Until the file is valid the answer is
+   `ERR refused`.
+6. The shim reports ready; clown starts the provider.
+7. Clown writes the unit record (its result file) once the provider has
+   started.
+8. The spawn's hello writes the principal mapping from the unit record. The
+   verbs are ready.
+
+Readiness gates ONLY the `session` service, per call, and only for a peer the
+exact check already admitted (a foreign peer learns nothing about the session's
+state). A `session` hello before readiness is answered
+`ERR refused refused: the bridge is not ready yet: <condition>` (one line) and
+the connection closes; the listener lives and the shim's retry applies. The
+conditions:
+
+- the frontend's principal mapping for the serve's principal does not exist yet,
+  or cannot be used yet: not ready;
+- that mapping names ANOTHER session than the one the listener carries: HARD
+  FAILURE at any time;
+- a unit record written BEFORE this serve started is the previous launch's and is
+  ignored (a relaunch is a new clown process, a new unit name and a new serve); a
+  missing record is not a failure, since the cgroup file admits a peer;
+- a unit record written AFTER this serve started that names another unit than
+  `CLOWN_BRIDGE_UNIT`: HARD FAILURE.
+
+A hard failure refuses the call (`ERR refused refused: the bridge for this
+session has stopped; the serve log says why`), ends the listener, marks the
+state file down and wakes the holders. The listener also asks on its 2 s tick,
+so a hard failure ends it without a connection.
 
 ## Shim behaviour
 
