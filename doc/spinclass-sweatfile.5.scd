@@ -1451,6 +1451,27 @@ because the switch changes what a session can sign with and is the operator's.
 	sessions. *sc session-key SESSION* prints the session's public key and
 	fingerprint. Any other value is an error and leaves the key holder off.
 
+	The programs the pair runs are pinned into the build as absolute store
+	paths; an unpinned build refuses to start a pair and never looks a name up on
+	PATH.
+
+	With *"on"* a worker's environment loses every variable that names the
+	operator's agent: *SSH_AUTH_SOCK* is replaced by the holder's socket, and
+	*PIGGY_AUTH_SOCK*, *PIVY_AUTH_SOCK*, *SSH_AGENT_PID*, *GPG_AGENT_INFO* and any
+	*SSH_ASKPASS\** (including *SSH_ASKPASS_REQUIRE*) are set to the empty string,
+	whether the launching process or a configured entry env set them. Empty is
+	unset to piggy and to ssh. *GIT_SSH*, *GIT_SSH_COMMAND* and an *IdentityAgent*
+	in an ssh configuration are not touched.
+
+	*This is not a boundary for an unconfined worker.* The operator's agent
+	socket files stay in his home and runtime directory, and a worker running as
+	the same user can open one by path (for example
+	*$XDG_RUNTIME_DIR/piggy-agent.sock*, *~/.local/state/ssh/\*.sock*, a
+	forwarded agent under */tmp/ssh-\**, or *$XDG_RUNTIME_DIR/gnupg*). The
+	switch removes the pointers and the habit. Withholding the sockets is the
+	confined unit's job, and until the confined spec stops binding the
+	operator's agent (the key holder's item B) a confined unit still receives it.
+
 ## [host-queue]
 
 Host-wide gate policy (#424,

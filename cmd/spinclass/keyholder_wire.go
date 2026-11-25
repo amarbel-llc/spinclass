@@ -89,17 +89,30 @@ func keyholderSessionEnv(home, repoPath, sessionKey string, stderr io.Writer) (m
 	if err != nil {
 		return nil, fmt.Errorf("starting the session's key holder: %w", err)
 	}
-	return map[string]string{"SSH_AUTH_SOCK": pair.AgentSock}, nil
+	kh := map[string]string{"SSH_AUTH_SOCK": pair.AgentSock}
+	// Every other variable that names the operator's agent, set in the launching
+	// process, is emptied for the session (empty is unset to piggy and to ssh).
+	for _, name := range keyholder.OperatorAgentVarsIn(os.Environ()) {
+		kh[name] = ""
+	}
+	return kh, nil
 }
 
 // withKeyholderEnv returns env with the key holder's variables laid over it
-// (they replace the operator's SSH_AUTH_SOCK); env itself is never modified.
+// (they replace the operator's SSH_AUTH_SOCK) and every other variable that
+// names the operator's agent emptied, including one a configured entry env set;
+// env itself is never modified.
 func withKeyholderEnv(env, kh map[string]string) map[string]string {
 	if len(kh) == 0 {
 		return env
 	}
 	out := make(map[string]string, len(env)+len(kh))
 	maps.Copy(out, env)
+	for k := range out {
+		if keyholder.IsOperatorAgentVar(k) {
+			out[k] = ""
+		}
+	}
 	maps.Copy(out, kh)
 	return out
 }
