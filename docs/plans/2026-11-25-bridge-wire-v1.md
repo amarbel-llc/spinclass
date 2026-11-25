@@ -4,6 +4,13 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119. The
 reference implementation is `internal/0/bridge` (standard library only); its
 `testdata/vectors.json` is normative where this text is silent.
 
+This file is the single home of the contract: clown's FDR 0048 links to it by
+commit and does not restate it. When the bridge merges, this text becomes the
+manpage `spinclass-bridge(7)` (principle 21: reference material is a manpage
+shipped with the derivation, not a plan document); until then this file is the
+source and the manpage is derived from it, not written beside it. Step 1 is the
+`session` and `control` services; everything marked "extension" is not step 1.
+
 ## Socket and directory
 
 The frontend listens on a unix stream socket named `bridge.sock` in the
@@ -40,7 +47,18 @@ reader refuses text over 512 bytes. The server MUST send no service byte before
 `OK\n`. After `OK\n` the connection is the service's byte stream in both
 directions. The shim MUST read the reply byte at a time, up to the newline, so
 service bytes that follow `OK\n` at once are not consumed; the reply is bounded
-at 64+512 bytes. After an `ERR` the server closes the connection.
+at 64+512 bytes. After an `ERR` the server closes the connection, in this order: it writes the
+line, half-closes its write side (`CloseWrite`), and drains what the peer still
+sends for at most 4096 bytes or 200 ms, so that a peer's unread hello cannot
+turn the reply into a reset. Everything after `OK\n` is the service's: either
+side may half-close; the frontend takes a peer's write-EOF on a data stream as
+the end of the request, finishes its answer and closes, and a `control` stream
+is not ended by a peer's write-EOF (see "Control service").
+
+The text after `ERR <code>` is OPTIONAL human text. A reader MUST accept
+`ERR <code>` with an empty text, with or without the separating space, MUST
+NOT parse the text or branch on it (the code is the interface), and MUST show
+or log it only within the 512-byte bound. A writer SHOULD send a text.
 
 ## Version
 
@@ -59,12 +77,37 @@ label the server does not serve, is answered `ERR unknown-service <label>`.
 A malformed label is `ERR error malformed hello`. A served label is answered
 `OK\n` and the stream is that service's.
 
-## Control stream
+## Control service
 
 `control` is the one stream a shim holds open for the life of the session. The
 frontend uses it to learn the shim is alive (its loss means the session is
-gone) and to push notices; its framing is the control service's, not the
-wire's. At most one `control` stream per session is open; a second is `ERR busy`.
+gone) and to push notices. At most one `control` stream per session is open; a
+second is `ERR busy`.
+
+Framing: after `OK\n` the stream is NDJSON in both directions, one JSON object
+per line. A frame has a required string field `type`; a frame without it is
+skipped. A reader MUST ignore a frame whose `type` it does not know (so a later
+version can add types), MUST skip, not fail on, a line over 1 MiB, and MUST
+NOT treat a skipped line as the end of the stream. The shim writes nothing
+after its hello and never half-closes `control`: the end of the stream, in
+either direction, IS the signal. The end of the stream from the frontend means
+the bridge is down (the shim says so, see "Shim behaviour"); the frontend
+treats a peer that is fully gone (not a peer's write-EOF alone) as the shim
+having ended and frees the slot.
+
+## Session service
+
+`session` is MCP JSON-RPC 2.0, newline-delimited, over the stream, served by the
+same server as stdio MCP. It lists and serves exactly five tools: `whoami`,
+`list-handles`, `restart-this-session`, `cancel-restart` and
+`close-this-session`. A tool outside the five is JSON-RPC -32602
+(`unknown tool: <name>`) and is not listed. A call refused for want of a right
+or because the caller is inside its unit is -32001 with text beginning
+`refused: ` (see "Refusal text"); every other failure is a tool result with
+`isError` (see the end of "Refusal texts"). The request never names the session
+acted on, nor the caller: both are the listener's (see "Identity"). A bridged
+call is CONFINED by construction: the classifier reads the origin the listener
+put in the call's context, never the request bytes or the environment.
 
 ## Limits and timeouts
 
@@ -160,12 +203,130 @@ The frontend does not listen at all unless the principal it serves resolves,
 through the frontend's own mapping, to the key the listener carries; otherwise it
 stays off and the failure is logged and counted.
 
+## Admission: who may connect
+
+The listener admits a connection only when the peer's cgroup (read from its
+pidfd, `SO_PEERPIDFD`, never from a pid number) is EXACTLY the unit's
+`ControlGroup`: strict equality, no descendant, no prefix, no suffix match
+(empty, `/` and a trailing slash are refused, and a peer with no pidfd is
+refused, never admitted by a weaker check). The exact check (strict equality,
+no descendants) is clown's `pkgs/peercheck.CheckPeerExact`, merged at clown
+0265f77. The listener holds no checker of its own: with none wired it refuses
+to start and says so.
+
+The expected cgroup is read from the file named by `CLOWN_BRIDGE_CGROUP_FILE`,
+on every connection, never cached. The file MUST be a regular file (not a link,
+not a FIFO) owned by the session's user, mode 0600, outside the bridge
+directory, and its content is exactly the cgroup path with no trailing newline.
+Until the file is valid the listener admits nobody, and the answer to a peer it
+cannot yet admit (the file missing, empty, unreadable or not as above, or a
+peer outside the cgroup) is `ERR refused <text>` and nothing else: the shim
+retries `refused` and a different code would end its retry. The text names the
+reason in plain words and carries nothing from the peer.
+
+When clown drops the bridge after the listener started, it removes `bridge.sock`
+and `bridge.cgroup` and logs it. The listener MUST notice either file gone
+after it was once valid, close, and say so (it checks on a short timer): a
+socket that is not the file it created, or a cgroup file that was valid and is
+gone, is a dead bridge, not a closed door to wait at. A cgroup file that was
+never written is not death; it is `refused`, until it appears.
+
+## Launcher obligations (clown)
+
+These are what clown MUST do for the listener's checks to mean anything:
+
+1. Create the directory (`<runtime>/clown/launch/<key>/bridge/`) mode 0700, owned
+   by the session's user, absolute, not a link, and start from it clean: remove
+   any stale `bridge.sock`, `bridge.cgroup` and `bridge.cgroup.tmp` before the
+   frontend starts. Refuse a link or a foreign-owned directory.
+2. Bind the directory into the unit READ-ONLY (`BindReadOnlyPaths=`; the
+   reference test is `TestTheBridgeDirIsBoundReadOnlyAndNeverWritable` in clown's
+   agentscope). Nothing writable (no `BindPaths=`, no `ReadWritePaths=`) may
+   cover the directory or any directory above it that the unit can reach, or the
+   unit could replace the socket.
+3. Write the cgroup file OUTSIDE the bind (`<runtime>/clown/launch/<key>/bridge.cgroup`),
+   mode 0600, content exactly the unit's `ControlGroup` path with no trailing
+   newline, via `<file>.tmp` and a rename (a link in the way is replaced, not
+   followed), as soon as systemd reports the unit active with its main process
+   settled and BEFORE the provider starts. Refuse to write a value that does not
+   end in `/clown-agent.slice/<unit>`. The file is written once per unit.
+4. Set `CLOWN_BRIDGE_DIR`, `CLOWN_BRIDGE_UNIT` (`<name>.service`) and
+   `CLOWN_BRIDGE_CGROUP_FILE` on the serve process only, and remove them from
+   clown's own environment after routing them. When the bridge is off, whatever
+   the reason (the operator switch, an unconfined session, any refusal that
+   dropped it), all three are set to the EMPTY string, present and empty, not
+   left unset. The frontend treats empty exactly as unset.
+5. Wait up to 10 s after starting serve for `bridge.sock` (a socket, not a
+   file). No socket means the frontend's own gate is off: clown binds nothing,
+   sets no `CLOWN_BRIDGE_SOCKET` and advertises no `bridge-v1`; the launch goes
+   on.
+
+Inside the unit: `CLOWN_BRIDGE_SOCKET` is the socket's path (the same path as
+outside), the shim's flag is `--bridge SOCK`, and clown advertises the result
+capability `bridge-v1` only once the cgroup file was written. A view unit refuses
+a bridge in code.
+
+## Shim behaviour
+
+The shim (clown's) acts per reply, by code only:
+
+| Reply | On `control` | On a data stream |
+| --- | --- | --- |
+| `ERR version` | the bridge is down | the bridge is down |
+| `ERR busy`, `ERR refused` | retried for a 15 s window (100 ms, doubling to 1 s); the first connect also tries three times, 200 ms apart, on an unreachable or busy bridge | said to that client; the stream fails, the bridge stays up |
+| `ERR unknown-service`, `ERR error` | said to that client; final, the bridge stays up | said to that client; the bridge stays up |
+| connect failed, EOF, no reply in time | retried as above | the call fails; with `control` held only that connection fails, without it the shim marks the bridge down |
+
+A failed data dial fails only that connection while `control` is held. The end
+of `control` is the bridge being down.
+
 ## Failure text
 
 When the shim cannot reach the frontend (no socket, refused connect, closed
 stream, no reply within the timeout) it MUST fail the call at once with
 `clown: the bridge is down (<reason>); no tool or model call can leave this session; the session's frontend is gone or restarting`
-and MUST NOT retry silently or fall back to a direct path.
+and MUST NOT retry silently or fall back to a direct path. (The retries above
+are the shim's connect attempts before the bridge is declared down, not a
+fallback.)
+
+## Egress (extension, NOT step 1, not built)
+
+Provisional and unbuilt, recorded so that step 1 does not close the door: the
+frontend stays the one door (accept, peer check, hello, label, policy, the open
+logged) and hands the accepted connection to the service's owner (clown's
+outer process) over a frontend-side unix socket by `SCM_RIGHTS`. The peer
+credentials of the passed connection stay the original connector's, so clown's
+proxy keeps its own exact unit-cgroup check and no peer check is loosened
+(the credentials staying the connector's is expected behaviour, not yet tested
+here). Because the frontend no longer sees the bytes or the close, the proxy
+reports a close frame `{id, bytes, outcome}` back on the passing channel; the
+frontend keeps the stream slot and the `open` event and frees the slot on the
+close frame, or on a lease timeout when the proxy dies without one, so the
+64-stream cap and the one observed event per connection still hold. The hand-off
+socket needs its own exact peer check, a per-session path outside the unit's
+binds, and a rule for an absent owner (`ERR error`, never a held fd).
+
+## Not verified (to be observed, not asserted)
+
+- Whether a relaunch of the session (an in-place restart) gives a new unit
+  name, a new cgroup and a new frontend process. Code-read by clown's owner:
+  one unit name and one serve per clown process, so a restart is expected to be
+  a new unit and a new serve. NOT observed. The first live seam logs the serve's
+  pid and `CLOWN_BRIDGE_UNIT` before and after one in-place restart.
+- How long serve's stdio from clown lives. Not checked.
+
+## Written disagreements (clown round 1, recorded)
+
+- A listener whose gate is off while clown waits 10 s for the socket (B-M3): a
+  rollout-order fact, not a defect: the operator switch and the frontend gate are
+  set together; clown's log line names `[bridge] enable`.
+- The down-message wording (B-L5) is the vector's and this contract's: clown
+  does not change it alone. A wording that names a local cause is a new vector
+  first.
+- A counter for refused connections on clown's side (B-M6) is not built by
+  clown; the refusal is logged there, rate limited, and counted by the frontend
+  as `spinclass.bridge.unknown.refused` (a peer refused before its hello has named
+no service).
 
 ## Crossing log
 
@@ -173,10 +334,12 @@ The frontend MUST keep a log with one NDJSON line per crossing, at
 `<state>/spinclass/bridge/<principal>.ndjson` (the directory mode 0700, the file
 0600, created by the frontend; the session's unit has no access to it). A line
 has the fields `ts` (RFC 3339 with nanoseconds, UTC), `session`, `service`,
-`verb`, `outcome`, `duration_ms`, `req_bytes`, `resp_bytes`, `arg_names` and
-`args_sha256`, and MAY have `fields`. `outcome` is one of `ok`, `refused`,
-`error`, `busy`, `hello-timeout`; a hello answered `ERR unknown-service` is
-logged as `refused` and one answered `ERR version` as `error`. `service` is one
+`verb`, `outcome`, `duration_ms`, `req_bytes`, `resp_bytes`, `arg_names`,
+`other_arg_names` and `args_sha256`, and MAY have `fields` and `truncated`.
+`outcome` is one of `ok`, `refused`, `error`, `busy`, `hello-timeout`,
+`version`; a hello answered `ERR unknown-service` is logged as `refused` and
+one answered `ERR version` as `version` (its own outcome: it means the shim
+and the frontend were built apart). `service` is one
 of the reserved labels or `unknown`. A call on the `session` service is one
 line whose `verb` is the tool name (`unknown` for a tool the service does not
 list) and whose outcome follows the JSON-RPC result: `ok`, `refused` when the
@@ -184,11 +347,19 @@ error code is -32001, `error` otherwise. A hello that did not become a stream
 is one line with verb `hello`; a served `control` stream is one line with verb
 `stream`.
 
-Redaction (normative): argument VALUES MUST NOT be logged. A line carries
-`arg_names`, the argument names sorted (an empty list for none), and
-`args_sha256`, the first 16 hex characters of the sha256 of the arguments'
+Redaction (normative): argument VALUES MUST NOT be logged, and neither may an
+argument NAME a verb does not declare. A line carries `arg_names`, the names
+sorted (an empty list for none) of the arguments the verb's input schema
+declares, `other_arg_names`, the number of other names the call carried (a
+request cannot write its own text into the log through an argument name), and
+`args_sha256`, the first 16 hex characters of the HMAC-SHA256 of the arguments'
 canonical JSON (keys sorted, no insignificant whitespace; the raw bytes when the
-arguments are not valid JSON). A per-verb allow-list (`SafeFields`) may add
+arguments are not valid JSON) under a random key generated when the log opens
+and never written anywhere (so the digest compares calls within one frontend
+process and cannot be tested against a guessed argument by anyone who only has
+the file). A line is at most 512 bytes including the newline: a longer one
+loses its `fields`, then its `arg_names` (they stay counted), then the tail of
+its `session`, and carries `"truncated": true`. A per-verb allow-list (`SafeFields`) may add
 `fields`: a map of argument name to value for the names `session`, `branch` and
 `target` only, each logged only if it is a string of at most 128 characters
 matching `[A-Za-z0-9._/-]+`, otherwise dropped. Nothing from free text
@@ -205,6 +376,15 @@ request reaches a metric name); `<outcome>` is `ok`, `refused` (JSON-RPC error
 -32001) or `error`, as in the log. Emission is best effort and bounded: a burst
 that finds every slot taken drops the metric.
 
+The log directory MUST be a real directory (not a link) owned by the frontend's
+user, tightened to 0700 when it is not; the file is opened without following a
+link (`O_NOFOLLOW`, `O_NONBLOCK`) and MUST be a regular file of that user, else
+the write fails (counted, not delivered to the crossing), so a link or a FIFO
+put where the log goes neither redirects nor blocks a crossing. The frontend's
+own log lines about the listener (refused peers, refused hellos, panics) are
+rate limited, one line per kind per 10 s, the next one carrying how many were
+suppressed.
+
 Retention: when a write would take the file past 4 MiB it is renamed to
 `<principal>.ndjson.1` (older generations shift up; at most three are kept, `.1`
 to `.3`), and log files older than 14 days are deleted when the log opens. A
@@ -216,9 +396,17 @@ most once a minute.
 `internal/0/bridge/testdata/vectors.json` is a JSON array of cases with an `op`:
 `hello` (stream bytes in `input`; expect the parse result, the reply line, and
 `accept`; `rest` is what must stay unread), `reply` (stream bytes; expect
-`ok`, `code`, `text`, and `rest`) and `format-err` (code and text in; expect the
-reply line). `parse_err` is `malformed` or `too-long`. Any string may instead be
+`ok`, `code`, `text`, and `rest`), `format-err` (code and text in; expect the
+reply line), `socket-path` (`dir` or `dir_gen` in; expect `path`/`path_gen`
+and, when given, `path_len`, or `path_err` of `too-long` or `empty`),
+`down-message` (`reason` in; expect `message`) and `constants` (the values both
+sides share: the socket name, the three variable names, the byte limits, the
+hello timeout in ms, the major, the version hint, the reserved labels and the
+reply codes; a side's own constants MUST equal them). `parse_err` is
+`malformed` or `too-long`. Any string may instead be
 given as a `*_gen` object `{prefix, repeat, n, suffix}`. `served` defaults to
 all eight reserved labels. Both implementations MUST pass every case.
 `vectors.json.sha256` holds `sha256sum` output; a vendored copy MUST match it,
-and a change to the file MUST change the digest and bump this text.
+and a change to the file MUST change the digest and bump this text. The file
+has 82 array entries (a test run reports more than that, one per subtest and
+helper case: count entries, not test lines).

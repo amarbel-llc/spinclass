@@ -45,6 +45,19 @@ type vector struct {
 	Code       string   `json:"code"`
 	Text       string   `json:"text"`
 	TextGen    *gen     `json:"text_gen"`
+
+	// socket-path
+	Dir     string `json:"dir"`
+	DirGen  *gen   `json:"dir_gen"`
+	Path    string `json:"path"`
+	PathGen *gen   `json:"path_gen"`
+	PathLen int    `json:"path_len"`
+	PathErr string `json:"path_err"`
+	// down-message
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+	// constants
+	Constants map[string]any `json:"constants"`
 }
 
 func (v vector) input() string {
@@ -144,10 +157,86 @@ func TestVectors(t *testing.T) {
 				if got := string(FormatErr(v.Code, v.text())); got != v.wantReply() {
 					t.Errorf("FormatErr(%q, ...) = %q, want %q", v.Code, got, v.wantReply())
 				}
+			case "socket-path":
+				runSocketPath(t, v)
+			case "down-message":
+				if got := DownMessage(v.Reason); got != v.Message {
+					t.Errorf("DownMessage(%q) = %q, want %q", v.Reason, got, v.Message)
+				}
+			case "constants":
+				runConstants(t, v)
 			default:
 				t.Fatalf("unknown op %q", v.Op)
 			}
 		})
+	}
+}
+
+func runSocketPath(t *testing.T, v vector) {
+	dir := v.Dir
+	if v.DirGen != nil {
+		dir = v.DirGen.String()
+	}
+	got, err := SocketPath(dir)
+	switch v.PathErr {
+	case "":
+		if err != nil {
+			t.Fatalf("SocketPath(%q) = %v", dir, err)
+		}
+		want := v.Path
+		if v.PathGen != nil {
+			want = v.PathGen.String()
+		}
+		if got != want {
+			t.Errorf("SocketPath(%q) = %q, want %q", dir, got, want)
+		}
+		if v.PathLen != 0 && len(got) != v.PathLen {
+			t.Errorf("path is %d bytes, want %d", len(got), v.PathLen)
+		}
+	case "too-long":
+		if err == nil || !strings.Contains(err.Error(), "over the unix socket limit") {
+			t.Errorf("SocketPath(%d bytes) = %q, %v; want the too-long refusal", len(dir), got, err)
+		}
+	case "empty":
+		if err == nil || !strings.Contains(err.Error(), "is empty") {
+			t.Errorf("SocketPath(%q) = %q, %v; want the empty refusal", dir, got, err)
+		}
+	default:
+		t.Fatalf("unknown path_err %q", v.PathErr)
+	}
+}
+
+func runConstants(t *testing.T, v vector) {
+	asStrings := func(key string) string {
+		var parts []string
+		list, _ := v.Constants[key].([]any)
+		for _, e := range list {
+			parts = append(parts, fmt.Sprint(e))
+		}
+		return strings.Join(parts, " ")
+	}
+	checks := map[string][2]any{
+		"socket_name":             {v.Constants["socket_name"], SocketName},
+		"env_dir":                 {v.Constants["env_dir"], EnvDir},
+		"env_unit":                {v.Constants["env_unit"], EnvUnit},
+		"env_cgroup_file":         {v.Constants["env_cgroup_file"], EnvCgroupFile},
+		"max_hello_bytes":         {v.Constants["max_hello_bytes"], float64(MaxHelloBytes)},
+		"max_reply_text_bytes":    {v.Constants["max_reply_text_bytes"], float64(MaxReplyTextBytes)},
+		"max_streams_per_session": {v.Constants["max_streams_per_session"], float64(MaxStreamsPerSession)},
+		"max_socket_path":         {v.Constants["max_socket_path"], float64(MaxSocketPath)},
+		"hello_timeout_ms":        {v.Constants["hello_timeout_ms"], float64(HelloTimeout.Milliseconds())},
+		"server_major":            {v.Constants["server_major"], float64(ServerMajor)},
+		"version_hint":            {v.Constants["version_hint"], VersionHint},
+		"reserved_services":       {asStrings("reserved_services"), strings.Join(ReservedServices, " ")},
+		"codes":                   {asStrings("codes"), strings.Join([]string{CodeVersion, CodeUnknownService, CodeRefused, CodeBusy, CodeError}, " ")},
+	}
+	if len(v.Constants) != len(checks) {
+		t.Errorf("the vector names %d constants, the test checks %d: they must match", len(v.Constants), len(checks))
+	}
+	for name, c := range checks {
+		if c[0] != c[1] {
+			t.Errorf("%s: vector %v, package %v", name, c[0], c[1])
+		}
 	}
 }
 
@@ -241,7 +330,7 @@ func TestEveryVectorOpIsCovered(t *testing.T) {
 	for _, v := range loadVectors(t) {
 		seen[v.Op] = true
 	}
-	for _, op := range []string{"hello", "reply", "format-err"} {
+	for _, op := range []string{"hello", "reply", "format-err", "socket-path", "down-message", "constants"} {
 		if !seen[op] {
 			t.Errorf("no vector for op %q", op)
 		}
