@@ -27,6 +27,24 @@ func TestStripInheritedSessionIDs(t *testing.T) {
 	}
 }
 
+// A launcher's bridge never reaches a child: the directory, unit, cgroup file
+// and socket name one session's bridge, and a child must get its own from its
+// own clown (or the empty string when it has none).
+func TestStripInheritedBridgeVariables(t *testing.T) {
+	in := []string{
+		"CLOWN_BRIDGE_DIR=/run/user/1000/clown/launch/k/bridge",
+		"CLOWN_BRIDGE_UNIT=clown-agent-k.service",
+		"CLOWN_BRIDGE_CGROUP_FILE=/run/user/1000/clown/launch/k/bridge.cgroup",
+		"CLOWN_BRIDGE_SOCKET=/run/user/1000/clown/launch/k/bridge/bridge.sock",
+		"CLOWN_BRIDGE_DIRECT=keep",
+		"PATH=/usr/bin",
+	}
+	want := []string{"CLOWN_BRIDGE_DIRECT=keep", "PATH=/usr/bin"}
+	if got := StripInheritedSessionIDs(in); !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 // The parent's troupe credentials never reach a child (spinclass#169): its
 // clown mints the child's own; the child's user name is left for clown.
 func TestStripInheritedTroupeCredentials(t *testing.T) {

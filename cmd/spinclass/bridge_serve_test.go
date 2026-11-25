@@ -240,6 +240,59 @@ func TestStartBridgeStaysOffUnlessThePrincipalResolvesToTheListenersKey(t *testi
 	}
 }
 
+// The unit clown names must be the unit the frontend recorded for the session.
+// No readable record is not a mismatch; a record naming another unit is, and
+// counts like a failed start.
+func TestStartBridgeStaysOffWhenTheRecordedUnitIsAnother(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		recorded  string
+		hasRecord bool
+		listening bool
+	}{
+		{"the record names the same unit", e2eUnit, true, true},
+		{"the record names another unit", "clown-agent-someone-else.service", true, false},
+		{"no readable record", "", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("CLOWN_SESSION_ID", e2ePrincipal)
+			t.Setenv("SPINCLASS_SESSION_ID", sessionTestKey)
+			stageSessionKey(t, sessionTestKey, e2ePrincipal)
+			failures := stubBridgeFailureHook(t)
+			cg := wireTestPeerCheck(t, nil)
+			origUnit := bridgeRecordedUnit
+			bridgeRecordedUnit = func(string) (string, bool) { return tc.recorded, tc.hasRecord }
+			t.Cleanup(func() { bridgeRecordedUnit = origUnit })
+			dir := shortBridgeDir(t)
+			old := bridgeResolve
+			bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit, CgroupFile: cg} }
+			t.Cleanup(func() { bridgeResolve = old })
+
+			stop := startBridge(context.Background(), e2eHandlerFactory())
+			if stop != nil {
+				defer stop()
+			}
+			if tc.listening {
+				if stop == nil || len(*failures) != 0 {
+					t.Fatalf("stop=%v failures=%v, want a listener and no failure", stop != nil, *failures)
+				}
+				return
+			}
+			if stop != nil {
+				t.Error("the bridge listens for a unit the record does not name")
+			}
+			if _, err := os.Lstat(filepath.Join(dir, bridge.SocketName)); !os.IsNotExist(err) {
+				t.Errorf("a socket was bound: %v", err)
+			}
+			if len(*failures) != 1 || !strings.Contains((*failures)[0], tc.recorded) || !strings.Contains((*failures)[0], e2eUnit) {
+				t.Errorf("failures = %v, want one naming both units", *failures)
+			}
+		})
+	}
+}
+
 // Any failure to start is a nil stop and serve goes on.
 func TestStartBridgeFromNeverFailsServe(t *testing.T) {
 	loose := shortBridgeDir(t)

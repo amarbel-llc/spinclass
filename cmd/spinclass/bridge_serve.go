@@ -11,6 +11,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/servelog"
@@ -73,6 +74,25 @@ var bridgeResolve = func() bridgePlan {
 	return resolveBridgePlan(os.Getenv, home, repoRoot)
 }
 
+// bridgeRecordedUnit is the agent unit the frontend recorded for the session
+// (clown writes the record once the unit is active); ok is false when there is
+// no readable record. A seam for tests.
+var bridgeRecordedUnit = func(sessionKey string) (unit string, ok bool) {
+	st, err := session.FindByTarget(sessionKey)
+	if err != nil || st == nil || st.IsTombstone() || st.Key() != sessionKey {
+		return "", false
+	}
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return "", false
+	}
+	rec, err := confinement.LoadUnitRecord(confinement.Host{}, stateDir, st.WorktreePath)
+	if err != nil {
+		return "", false
+	}
+	return rec.Unit, true
+}
+
 // startBridge starts the bridge listener when the plan allows it and returns
 // what stops it; nil when serve runs without it, with the reason in the serve
 // log. sessionHandler serves the session service. It never fails serve.
@@ -106,6 +126,16 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 	if perr != nil {
 		servelog.Errorf("serve.bridge off: %v", perr)
 		bridgeListenerFailed(key, perr)
+		return nil
+	}
+	// The unit clown named must be the unit the frontend recorded for this
+	// session: a bridge for a unit the record does not name is a bridge for
+	// someone else's unit. No readable record is not a mismatch (the cgroup
+	// file is what admits a peer); a record that names another unit is.
+	if recorded, ok := bridgeRecordedUnit(key); ok && recorded != plan.Unit {
+		uerr := fmt.Errorf("the unit clown named for the bridge (%s) is not the unit recorded for this session (%s)", plan.Unit, recorded)
+		servelog.Errorf("serve.bridge off: %v", uerr)
+		bridgeListenerFailed(key, uerr)
 		return nil
 	}
 	log := openBridgeCrossingLog()

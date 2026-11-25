@@ -33,10 +33,19 @@ import "strings"
 // session, and clown keeps CLOWN_PROFILE in its environment, so an inherited
 // one would apply the parent's profile to a child that asked for none. The
 // launcher sets a child's own pin explicitly (spawn.ProfileLaunchEnv).
+//
+// The bridge variables name one session's bridge: its directory, its unit and
+// its cgroup file. A child that inherited them would listen on, or be told it
+// serves, its launcher's bridge; clown sets them for the child's own launch
+// (empty when the bridge is off), so nothing may ride along.
 var inheritedSessionIDVars = []string{
 	"CLOWN_SESSION_ID=",
 	"CLAUDE_SESSION_ID=",
 	"CLOWN_UNIT=",
+	"CLOWN_BRIDGE_DIR=",
+	"CLOWN_BRIDGE_UNIT=",
+	"CLOWN_BRIDGE_CGROUP_FILE=",
+	"CLOWN_BRIDGE_SOCKET=",
 	"TROUPE_XMPP_PASSWORD_FILE=",
 	"TROUPE_XMPP_PASSWORD=",
 	"CLOWN_PROFILE=",
