@@ -132,8 +132,8 @@ func startStoppedSession(child *session.State, starter, childPrincipal string, a
 // handleStartChildSession is the `start-child-session` MCP tool handler. Its
 // authority is a handle read from agent-writable session state, so a confined
 // caller is refused before anything else.
-func handleStartChildSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("start-child-session", "sc start-child-session"); refusal != nil {
+func handleStartChildSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "start-child-session", "sc start-child-session"); refusal != nil {
 		return refusal, nil
 	}
 	var p startChildParams

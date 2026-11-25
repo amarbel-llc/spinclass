@@ -44,8 +44,8 @@ func runResurrect(p resurrectParams) (string, error) {
 // handleResurrect is the `resurrect` MCP tool handler. resurrect checks no
 // caller identity and re-mints a forge credential for the session it
 // recreates, so a confined caller is refused before anything else.
-func handleResurrect(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("resurrect", "sc resurrect"); refusal != nil {
+func handleResurrect(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "resurrect", "sc resurrect"); refusal != nil {
 		return refusal, nil
 	}
 	var p resurrectParams

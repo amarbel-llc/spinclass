@@ -563,7 +563,7 @@ func appendNotPushedNote(text string, gitSync bool, mergeErr error) string {
 // worker does not merge itself (EPIC 0001: engineer-builder cannot merge); the
 // operator or coordinator lands it with `sc merge <target>`.
 func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("merge-this-session", "sc merge <target>"); refusal != nil {
+	if refusal := refuseConfinedServeCaller(ctx, "merge-this-session", "sc merge <target>"); refusal != nil {
 		return refusal, nil
 	}
 	var params struct {
@@ -756,7 +756,7 @@ func runDetachableMerge(ctx context.Context, cwd, repoPath, branch, defaultBranc
 // buffered attestation on a pass; a confined caller is refused (`sc check` is
 // the operator's path).
 func handleCheckThisSession(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("check-this-session", "sc check"); refusal != nil {
+	if refusal := refuseConfinedServeCaller(ctx, "check-this-session", "sc check"); refusal != nil {
 		return refusal, nil
 	}
 	cwd, err := os.Getwd()
@@ -790,7 +790,7 @@ func handleCheckThisSession(ctx context.Context, _ json.RawMessage, _ command.Pr
 // result is retrieved via ringmaster's own surfaces (job_status/job_read/
 // job_wait) using the returned id; only registered under clown.
 func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("merge-this-session-async", "sc merge <target>"); refusal != nil {
+	if refusal := refuseConfinedServeCaller(ctx, "merge-this-session-async", "sc merge <target>"); refusal != nil {
 		return refusal, nil
 	}
 	var params struct {
@@ -951,8 +951,8 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 // handleCheckThisSessionAsync is the non-blocking variant of
 // check-this-session: it runs the pre-merge hook in the background and returns
 // a job id immediately.
-func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("check-this-session-async", "sc check"); refusal != nil {
+func handleCheckThisSessionAsync(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "check-this-session-async", "sc check"); refusal != nil {
 		return refusal, nil
 	}
 	cwd, err := os.Getwd()
@@ -1023,8 +1023,8 @@ func jobAlreadyRunningResult() *command.Result {
 }
 
 // handleJobCancel cancels the worktree session's running background job.
-func handleJobCancel(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("session-job-cancel", "ringmaster cancel <job-id>"); refusal != nil {
+func handleJobCancel(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "session-job-cancel", "ringmaster cancel <job-id>"); refusal != nil {
 		return refusal, nil
 	}
 	cwd, err := os.Getwd()
@@ -1246,8 +1246,8 @@ func buildHookResult(text string, blobLinks []check.BlobLink, hookErr error) *co
 // handleUpdateDescription sets the serve session's description, which `list`
 // shows to every session; from a confined caller it is a prompt-injection
 // carrier, so it is refused (`sc update-description` is the operator's path).
-func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("update-this-session-description", "sc update-description"); refusal != nil {
+func handleUpdateDescription(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "update-this-session-description", "sc update-description"); refusal != nil {
 		return refusal, nil
 	}
 	var params struct {
@@ -1424,8 +1424,8 @@ func lazyImplicitRand() string {
 // handleNothingButTheTruth records the self-attestation a merge or check
 // claims. Its content is not checked for truth, so a confined caller, which
 // may not merge, may not attest either.
-func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("nothing-but-the-truth", "sc merge <target>"); refusal != nil {
+func handleNothingButTheTruth(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "nothing-but-the-truth", "sc merge <target>"); refusal != nil {
 		return refusal, nil
 	}
 	var params struct {

@@ -454,8 +454,8 @@ func authorizeChildRight(tool, target, right string) (child *session.State, call
 // handleRestartChildSession is the `restart-child-session` MCP tool handler.
 // Its authority is a handle read from agent-writable session state, so a
 // confined caller is refused before anything else.
-func handleRestartChildSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("restart-child-session", "sc restart-child-session"); refusal != nil {
+func handleRestartChildSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "restart-child-session", "sc restart-child-session"); refusal != nil {
 		return refusal, nil
 	}
 	var p restartChildParams
@@ -1312,7 +1312,7 @@ func notifyRestartCancelled(st *session.State, req session.RestartRequest, calle
 // handleCancelRestart is the `cancel-restart` MCP tool handler. Cancelling the
 // caller's own restart is open; naming a child rests on a handle read from
 // agent-writable session state, so that form refuses a confined caller.
-func handleCancelRestart(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleCancelRestart(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var p cancelRestartParams
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &p); err != nil {
@@ -1320,7 +1320,7 @@ func handleCancelRestart(_ context.Context, args json.RawMessage, _ command.Prom
 		}
 	}
 	if p.Child != "" {
-		if refusal := refuseConfinedServeCaller("cancel-restart", "sc cancel-restart"); refusal != nil {
+		if refusal := refuseConfinedServeCaller(ctx, "cancel-restart", "sc cancel-restart"); refusal != nil {
 			return refusal, nil
 		}
 	}

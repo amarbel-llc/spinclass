@@ -214,8 +214,8 @@ func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 // a job-wakeup (handleSpawnSessionAsync). Without clown there is no wake
 // channel, so it falls back to the synchronous spawn (block on the hello and
 // return the result inline) — the same path the `sc spawn` CLI uses.
-func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("spawn-session", "sc spawn"); refusal != nil {
+func handleSpawnSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "spawn-session", "sc spawn"); refusal != nil {
 		return refusal, nil
 	}
 	var params spawnParams

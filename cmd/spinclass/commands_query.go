@@ -66,7 +66,7 @@ func registerQueryCommands(app *command.App) {
 		// spawner, so a confined caller is refused; the CLI (RunCLI below) is
 		// the operator's path.
 		Run: func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-			if refusal := refuseConfinedServeCaller("list", "sc list"); refusal != nil {
+			if refusal := refuseConfinedServeCaller(ctx, "list", "sc list"); refusal != nil {
 				return refusal, nil
 			}
 			var p struct {

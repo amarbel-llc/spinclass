@@ -10,6 +10,19 @@ import (
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
+// bridgeRefusalPrefix opens every refusal the bridge contract defines
+// (docs/plans/2026-11-25-bridge-wire-v1.md, "Refusal text"); the session
+// service turns a tool result that opens with it into JSON-RPC error -32001.
+const bridgeRefusalPrefix = "refused: "
+
+// bridgeRefusalText is the refusal for a verb that has no named right a
+// session inside its unit could be granted: it is the operator's, at a
+// terminal outside the unit.
+func bridgeRefusalText(tool, operatorCommand string) string {
+	return fmt.Sprintf("%s%s is not available to a session inside its unit; ask the operator (they hold it, by running `%s` at a terminal outside the unit)",
+		bridgeRefusalPrefix, tool, operatorCommand)
+}
+
 // serveCallerConfined classifies this serve's caller the way the grit tools do
 // (ClassifyServeCaller) and fails closed: an unresolvable state directory or
 // principal counts as confined. It is a variable so tests can stand in for the
@@ -55,10 +68,18 @@ func ungatedCLI[P any](run func(P) (string, error)) func(context.Context, json.R
 // parameter. The refusal says what the caller holds (no right to the tool) and
 // who holds it: the operator, through operatorCommand at a terminal outside
 // the unit (EPIC 0001 principle 9).
-func refuseConfinedServeCaller(tool, operatorCommand string) *command.Result {
-	confined, why := serveCallerConfined()
+//
+// ctx carries the call's origin when a transport established one: a call that
+// arrived on the bridge is confined whatever this serve's own classification
+// says, and is refused in the bridge contract's text (bridgeRefusalText). A
+// ctx with no origin (every stdio call) classifies as before, byte for byte.
+func refuseConfinedServeCaller(ctx context.Context, tool, operatorCommand string) *command.Result {
+	confined, why := confinement.ClassifyOrigin(ctx, serveCallerConfined)
 	if !confined {
 		return nil
+	}
+	if o, ok := confinement.OriginFrom(ctx); ok && o.Bridged() {
+		return command.TextErrorResult(bridgeRefusalText(tool, operatorCommand))
 	}
 	principal := os.Getenv("CLOWN_SESSION_ID")
 	if principal == "" {

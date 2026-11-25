@@ -129,8 +129,8 @@ func runSessionJobs(p sessionJobsParams) (string, error) {
 
 // handleSessionJobs is the `session-jobs` MCP tool handler. Like session-health
 // it reads agent-writable handle state, so a confined caller is refused.
-func handleSessionJobs(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("session-jobs", "sc session-jobs"); refusal != nil {
+func handleSessionJobs(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "session-jobs", "sc session-jobs"); refusal != nil {
 		return refusal, nil
 	}
 	var p sessionJobsParams

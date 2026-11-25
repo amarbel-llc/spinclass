@@ -208,8 +208,8 @@ func runSessionHealthWith(p sessionHealthParams, caller string, d healthDeps) (s
 // handleSessionHealth is the `session-health` MCP tool handler. It reads only
 // the caller's own held sessions, but it is gated like the other session verbs:
 // a confined caller reads agent-writable handle state, so it is refused.
-func handleSessionHealth(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("session-health", "sc session-health"); refusal != nil {
+func handleSessionHealth(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "session-health", "sc session-health"); refusal != nil {
 		return refusal, nil
 	}
 	var p sessionHealthParams

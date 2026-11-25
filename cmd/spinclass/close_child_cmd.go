@@ -286,8 +286,8 @@ func runCloseChild(p closeChildParams) (string, error) {
 // handleCloseChildSession is the `close-child-session` MCP tool handler. Its
 // authority is a handle read from agent-writable session state, and `force`
 // discards work, so a confined caller is refused before anything else.
-func handleCloseChildSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("close-child-session", "sc close"); refusal != nil {
+func handleCloseChildSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "close-child-session", "sc close"); refusal != nil {
 		return refusal, nil
 	}
 	var p closeChildParams

@@ -56,8 +56,8 @@ func runQueueStatus(p queueStatusParams) (string, error) {
 	return text + formatQueueBypass(bypass), nil
 }
 
-func handleQueueStatus(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("queue-status", "sc queue-status"); refusal != nil {
+func handleQueueStatus(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "queue-status", "sc queue-status"); refusal != nil {
 		return refusal, nil
 	}
 	var p queueStatusParams

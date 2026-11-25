@@ -116,8 +116,8 @@ func restartHungWith(child *session.State, caller, childPrincipal, reason string
 // handleRestartHungChild is the `restart-hung-child` MCP tool handler. Its
 // authority is a handle read from agent-writable session state, so a confined
 // caller is refused first.
-func handleRestartHungChild(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("restart-hung-child", "sc restart-hung-child"); refusal != nil {
+func handleRestartHungChild(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "restart-hung-child", "sc restart-hung-child"); refusal != nil {
 		return refusal, nil
 	}
 	var p restartHungParams

@@ -237,8 +237,8 @@ func runHostLoad(p hostLoadParams) (string, error) {
 // and every process on the host, the sibling enumeration `list` refuses a
 // confined caller for (FDR 0035), so it refuses one too; the CLI is the
 // operator's path.
-func handleHostLoad(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("host-load", "sc host-load"); refusal != nil {
+func handleHostLoad(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "host-load", "sc host-load"); refusal != nil {
 		return refusal, nil
 	}
 	var p hostLoadParams

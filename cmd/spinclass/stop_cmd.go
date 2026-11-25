@@ -198,8 +198,8 @@ func runStopChild(p stopChildParams) (string, error) {
 // handleStopChildSession is the `stop-child-session` MCP tool handler. Its
 // authority is a handle read from agent-writable session state, so a confined
 // caller is refused before anything else.
-func handleStopChildSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("stop-child-session", "sc stop-child-session"); refusal != nil {
+func handleStopChildSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "stop-child-session", "sc stop-child-session"); refusal != nil {
 		return refusal, nil
 	}
 	var p stopChildParams

@@ -94,8 +94,8 @@ func registerPermsCommands(app *command.App) {
 		},
 		// The tool lists every repo's allow rules, so a confined caller is
 		// refused; `sc perms-list` (RunCLI) is the operator's path.
-		Run: func(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-			if refusal := refuseConfinedServeCaller("perms-list", "sc perms-list"); refusal != nil {
+		Run: func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+			if refusal := refuseConfinedServeCaller(ctx, "perms-list", "sc perms-list"); refusal != nil {
 				return refusal, nil
 			}
 			var p permsListParams

@@ -12,6 +12,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
@@ -281,8 +282,8 @@ func grantSessionHandle(target, to, rights string) (string, error) {
 // handleGrantSessionHandle is the `grant-session-handle` MCP tool handler. A
 // grant hands reap and grant authority to any principal named in `to`, so a
 // confined caller is refused before anything else.
-func handleGrantSessionHandle(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("grant-session-handle", "sc grant-session-handle"); refusal != nil {
+func handleGrantSessionHandle(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "grant-session-handle", "sc grant-session-handle"); refusal != nil {
 		return refusal, nil
 	}
 	var p grantHandleParams
@@ -397,8 +398,8 @@ func releaseSessionHandle(target string) (string, error) {
 
 // handleReleaseSessionHandle is the `release-session-handle` MCP tool
 // handler.
-func handleReleaseSessionHandle(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if refusal := refuseConfinedServeCaller("release-session-handle", "sc release-session-handle"); refusal != nil {
+func handleReleaseSessionHandle(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller(ctx, "release-session-handle", "sc release-session-handle"); refusal != nil {
 		return refusal, nil
 	}
 	var p releaseHandleParams
@@ -502,16 +503,16 @@ func runListHandles(p listHandlesParams) (string, error) {
 // the caller's own handles and stays open; `accept` turns pending grants into
 // authority, so with it a confined caller is refused. Arguments that do not
 // parse are refused like an accept.
-func handleListHandles(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleListHandles(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var p listHandlesParams
 	if err := json.Unmarshal(args, &p); err != nil {
-		if refusal := refuseConfinedServeCaller("list-handles accept", "sc list-handles --accept"); refusal != nil {
+		if refusal := refuseConfinedServeCaller(ctx, "list-handles accept", "sc list-handles --accept"); refusal != nil {
 			return refusal, nil
 		}
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
 	if p.Accept {
-		if refusal := refuseConfinedServeCaller("list-handles accept", "sc list-handles --accept"); refusal != nil {
+		if refusal := refuseConfinedServeCaller(ctx, "list-handles accept", "sc list-handles --accept"); refusal != nil {
 			return refusal, nil
 		}
 	}
@@ -537,8 +538,12 @@ func listHandlesParamList() []command.Param {
 // principal (FDR 0032 D1), its session key when it has one, then the same
 // held/pending handle listing as list-handles.
 func runWhoami() (string, error) {
+	return runWhoamiFor(bestEffortSessionKey())
+}
+
+// runWhoamiFor is runWhoami for a session key the caller already established.
+func runWhoamiFor(key string) (string, error) {
 	principal := currentPrincipal()
-	key := bestEffortSessionKey()
 	if key == "" {
 		key = "(none)"
 	}
@@ -554,8 +559,15 @@ func runWhoami() (string, error) {
 // the App's CLI dispatch runs Run directly when RunCLI is absent, so this one
 // registration serves both `sc whoami` and the `whoami` MCP tool — the same
 // reason those two commands need no separate CLI registration either.
-func handleWhoami(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	text, err := runWhoami()
+//
+// A call that arrived on the bridge names the session key its listener was
+// created for (the origin in ctx), never anything in the request.
+func handleWhoami(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	key := bestEffortSessionKey()
+	if o, ok := confinement.OriginFrom(ctx); ok && o.Bridged() {
+		key = o.SessionKey
+	}
+	text, err := runWhoamiFor(key)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
