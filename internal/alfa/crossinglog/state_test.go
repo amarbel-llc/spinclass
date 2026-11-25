@@ -37,16 +37,20 @@ func TestStateRoundTripsWithOwnerOnlyModeAndNoTempLeft(t *testing.T) {
 	}
 }
 
+// rightToLeftOverride is U+202E spelled as its UTF-8 bytes, so no invisible
+// character appears literally in this source.
+const rightToLeftOverride = "\xe2\x80\xae"
+
 func TestStateReasonIsBoundedAndControlFree(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteState(dir, "p", State{Reason: "line one\nESC\x1b[31m injected ‮" + strings.Repeat("x", 1000)}); err != nil {
+	if err := WriteState(dir, "p", State{Reason: "line one\nESC\x1b[31m injected " + rightToLeftOverride + strings.Repeat("x", 1000)}); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := ReadState(dir, "p")
 	if !ok {
 		t.Fatal("no state read back")
 	}
-	if strings.ContainsAny(got.Reason, "\n\x1b‮") || len([]rune(got.Reason)) > maxStateReason+3 {
+	if strings.ContainsAny(got.Reason, "\n\x1b") || strings.Contains(got.Reason, rightToLeftOverride) || len([]rune(got.Reason)) > maxStateReason+3 {
 		t.Errorf("reason is not safe or bounded: %q", got.Reason)
 	}
 }
