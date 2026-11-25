@@ -2056,6 +2056,60 @@ debug-keyholder-probe fibby="" piggy="" timeout="60":
     fi
     say "agent.log tail:"; tail -n 8 "$base/agent.log" | sed 's/^/probe:   /'
 
+# Key holder live proof (item A): build this tree's spinclass, start ONE real session pair (fibby + holder as
+# transient `systemd-run --user` units) through the hidden `sc keyholder-pair`, check `ssh-add -L` against its
+# socket lists exactly one key and `sc session-key`-style facts hold, stop the pair, and assert zero leftover units,
+# processes and directories. Refuses while the host's per-cpu 1-minute load is 1.0 or more (one real run at a time).
+# Uses a virtual card inside fibby: no real card, no PIN, and the operator's agent is never inherited.
+#
+# start, list, stop one real key holder pair and assert nothing is left behind
+[group("debug")]
+debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    say() { printf 'live: %s\n' "$*"; }
+    load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
+    if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
+    out="$(nix build .#spinclass-native --no-link --print-out-paths 2>/dev/null | tail -1)"
+    sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built at $out"; exit 1; }
+    piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(command -v piggy)" || { say "no piggy on PATH"; exit 1; }
+    fibby="{{ fibby }}"
+    if [ -z "$fibby" ]; then for c in /nix/store/*-fibby-holder-0.1.0/bin/fibby; do fibby="$c"; done; fi
+    [ -x "$fibby" ] || { say "no fibby holder build found"; exit 1; }
+    base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/khl.XXXXXX")"; chmod 0700 "$base"
+    mkdir -m 0700 "$base/bin" "$base/state"
+    ln -s "$fibby" "$base/bin/fibby"; ln -s "$piggy" "$base/bin/piggy"
+    export PATH="$base/bin:$PATH" XDG_STATE_HOME="$base/state"
+    unset SSH_AUTH_SOCK PIGGY_AUTH_SOCK
+    s="{{ session }}"
+    stopped=0
+    cleanup() {
+      [ "$stopped" = 1 ] || "$sc" keyholder-pair --action stop --session "$s" >/dev/null 2>&1 || true
+      rm -rf "$base"
+    }
+    trap cleanup EXIT
+    say "spinclass=$sc"; say "state=$XDG_STATE_HOME"
+    "$sc" keyholder-pair --action start --session "$s" >"$base/start.out" 2>"$base/start.err"; rc=$?
+    say "start rc=$rc"; sed 's/^/live:   /' "$base/start.out"; sed 's/^/live:   err: /' "$base/start.err"
+    [ "$rc" = 0 ] || exit 1
+    sock="$(sed -n 's/^agent_sock //p' "$base/start.out")"
+    say "socket mode: $(stat -c '%a %U' "$sock")"
+    keys="$(SSH_AUTH_SOCK="$sock" timeout 30 ssh-add -L 2>&1)"; n="$(printf '%s\n' "$keys" | grep -c '^ssh-')"
+    say "ssh-add -L lists $n key(s): $keys"
+    [ "$n" = 1 ] || { say "FAIL: want exactly one key"; exit 1; }
+    "$sc" keyholder-pair --action start --session "$s" >"$base/start2.out" 2>&1
+    if cmp -s "$base/start.out" "$base/start2.out"; then say "second start: same pair, same key (idempotent)"; else say "FAIL: second start differs"; sed 's/^/live:   /' "$base/start2.out"; exit 1; fi
+    say "status: $("$sc" keyholder-pair --action status --session "$s" 2>&1 | head -1)"
+    "$sc" keyholder-pair --action stop --session "$s"; rc=$?; stopped=1
+    say "stop rc=$rc"
+    sleep 1
+    units="$(systemctl --user list-units --all --no-legend 'spinclass-keyholder-*' 2>&1 | grep -c spinclass-keyholder || true)"
+    procs="$(pgrep -f "$base" || true)"
+    dirs="$(find "$XDG_STATE_HOME" -mindepth 3 -maxdepth 3 -path '*keyholder/*' 2>/dev/null | wc -l)"
+    say "after stop: units=$units processes='${procs}' directories=$dirs"
+    if [ "$units" = 0 ] && [ -z "$procs" ] && [ "$dirs" = 0 ]; then say "LIVE-OK one pair started, listed one key, stopped, nothing left"; else say "FAIL: leftovers"; exit 1; fi
+
 # [explore] Poll a worker's record every few seconds and print ONE line per change
 # (UTC time, request queued, restarting_at, restarted_at, claude pid, recorded pid,
 # peek state) until restarted_at is set after restarting_at, or `limit` seconds

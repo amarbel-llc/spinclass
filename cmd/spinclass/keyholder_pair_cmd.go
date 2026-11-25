@@ -1,0 +1,81 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+)
+
+// keyholderPairOut is the command's output stream; tests replace it.
+var keyholderPairOut = func() io.Writer { return os.Stdout }
+
+// registerKeyholderPairCommand registers the hidden `sc keyholder-pair`: start,
+// stop or report a session's key holder pair by hand, for the live proof
+// (`just debug-keyholder-pair-live`). It ignores the [keyholder] switch, which
+// only governs what a session launch does on its own, and never touches a
+// session's record or environment.
+func registerKeyholderPairCommand(app *command.App) {
+	app.AddCommand(&command.Command{
+		Name:   "keyholder-pair",
+		Hidden: true,
+		Title:  "Start, stop or report a session's key holder pair",
+		Description: command.Description{
+			Short: "Start, stop or report a session's key holder pair (debugging)",
+			Long:  "action is start (idempotent; mints once), stop (holder, then fibby, then the directories) or status. The pair is keyed by the session key you give; no session need exist.",
+		},
+		Params: []command.Param{
+			{Name: "action", Type: command.String, Required: true, Description: "start, stop or status"},
+			{Name: "session", Type: command.String, Required: true, Description: "The session key the pair is named for"},
+		},
+		RunCLI: runKeyholderPair,
+	})
+}
+
+func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
+	var f struct {
+		Action  string `json:"action"`
+		Session string `json:"session"`
+	}
+	if err := json.Unmarshal(args, &f); err != nil {
+		return fmt.Errorf("keyholder-pair: %w", err)
+	}
+	if f.Session == "" {
+		return errors.New("keyholder-pair: --session is required")
+	}
+	l, err := keyholderLauncherFn()
+	if err != nil {
+		return fmt.Errorf("keyholder-pair: %w", err)
+	}
+	out := keyholderPairOut()
+	switch f.Action {
+	case "start":
+		p, err := l.Start(ctx, f.Session)
+		if err != nil {
+			return fmt.Errorf("keyholder-pair: %w", err)
+		}
+		fmt.Fprintf(out, "started %s\nfibby_unit %s\nagent_unit %s\nagent_sock %s\npublic_key %s\n", f.Session, p.FibbyUnit, p.AgentUnit, p.AgentSock, p.PublicKey)
+	case "stop":
+		if err := l.Stop(ctx, f.Session); err != nil {
+			return fmt.Errorf("keyholder-pair: %w", err)
+		}
+		fmt.Fprintf(out, "stopped %s\n", f.Session)
+	case "status":
+		p, ok, err := l.Running(ctx, f.Session)
+		if err != nil {
+			return fmt.Errorf("keyholder-pair: %w", err)
+		}
+		if !ok {
+			fmt.Fprintf(out, "not running %s\n", f.Session)
+			return nil
+		}
+		fmt.Fprintf(out, "running %s\nagent_sock %s\npublic_key %s\n", f.Session, p.AgentSock, p.PublicKey)
+	default:
+		return fmt.Errorf("keyholder-pair: action %q is not start, stop or status", f.Action)
+	}
+	return nil
+}
