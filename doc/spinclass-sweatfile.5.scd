@@ -1512,6 +1512,34 @@ because the switch changes what a session can sign with and is the operator's.
 	session's holder socket (never the operator's agent) and refuses the launch
 	when there is no live holder socket.
 
+	*What switching off does.* Setting *mode* to *"off"* (or removing the table)
+	starts nothing for new sessions and leaves nothing behind for them: no unit,
+	no directory, an untouched environment. It does NOT touch the pairs of
+	sessions that already have one: each runs until its session is closed (*sc
+	close* stops a session's pair whatever the switch says now), a resumed
+	unconfined worker goes back to the operator's agent while its pair idles, and
+	a confined session spawned with a holder is refused on resume (close it and
+	spawn a new one). To end every pair now, run *sc keyholder-stop --all* at a
+	terminal.
+
+	*Recovery.* *sc keyholder-stop --all --dry-run* lists every pair this user has
+	(one line each: its hash, its session, running or stopped) and marks the
+	ORPHANS: pairs with no live session, which nothing will ever close (a record
+	that vanished, a close with *--force* that left units running, a directory
+	removed by hand with both units still loaded). It needs no terminal. *sc
+	keyholder-stop --all* stops them all, holder first, then fibby, and removes a
+	pair's directories only after both units are inactive; it needs a terminal,
+	journals each stop to *$XDG_STATE_HOME/spinclass/keyholder-journal.ndjson*
+	with actor *tty*, and needs neither the switch nor the *fibby* and *piggy*
+	paths, so it still works after the host's configuration is gone. *sc clean*
+	stops the orphans only (a pair younger than ten minutes with no record is a
+	launch in flight and is left alone). A stopped pair's session keeps running
+	without a holder; its next resume or restart starts a new pair and mints a new
+	key if the switch is on. Two starts or stops of one session are serialised
+	by a lock file, *$XDG_STATE_HOME/spinclass/keyholder/<hash>.lock*, which stays
+	after the pair is gone; the second waits up to a minute and then fails naming
+	the lock.
+
 ## [host-queue]
 
 Host-wide gate policy (#424,

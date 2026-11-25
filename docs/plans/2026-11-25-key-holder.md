@@ -228,6 +228,38 @@ cannot write.
   `certificate EXPIRED` or `certificate unusable`; session-health also says `no
   certificate`.
 
+## Locks, leftovers and what off does (B-F6, B-F7, A-M4)
+
+- **Lock.** Start and Stop of one session take an exclusive flock on
+  `<state>/spinclass/keyholder/<hash>.lock`, in the keyholder root beside the
+  session directory (Stop removes the directory, so a lock inside it would vanish
+  under its holder). 0600, opened with O_NOFOLLOW, never removed. A second start
+  of the same session waits, then finds the live pair and returns it: one pair,
+  one mint, whatever races. A lock held for more than a minute fails the second
+  caller with a message naming the file. The file survives Stop on purpose: two
+  files for one pair would be two locks.
+- **Switching `mode` off** starts nothing and leaves nothing for NEW sessions.
+  The pairs of existing sessions run until their session closes; `sc close`
+  stops a pair whatever the switch says. A confined session spawned with a holder
+  is refused on resume (a changed agent is a changed boundary: close and respawn).
+- **`sc keyholder-stop --all [--dry-run]`** is the remedy: it stops every pair
+  this user has, by unit name and by directory, holder first, directories only
+  after both units are inactive, journalled to
+  `<state>/spinclass/keyholder-journal.ndjson` with actor `tty` (a journal that
+  cannot be written warns and the stop still happens: stopping is the safe
+  direction). A real stop needs a terminal; `--dry-run` lists and marks orphans
+  and needs none. It needs neither the switch nor the trusted paths, so it works
+  after the host's configuration is gone.
+- **Orphans** are pairs with no live session: a directory with no readable
+  record, units with no directory, a record naming a closed or vanished session.
+  A pair with no live session that is younger than ten minutes is a launch in
+  flight (the pair starts before the session record is written) and is not an
+  orphan. `sc clean` stops orphans; `sc keyholder-stop --all --dry-run` marks
+  them.
+- **Narrowing-only (A-M4, not built here).** The switch and the paths are read
+  from the target repo's hierarchy only today; whether a driver's own context
+  can force the holder ON for a spawn into another repo is the next item.
+
 ## Later
 
 For Sunday's review, not this build. Every session gets a holder, the ones the
