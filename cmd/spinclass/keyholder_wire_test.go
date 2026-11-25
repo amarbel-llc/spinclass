@@ -85,7 +85,7 @@ func (f *khFakeRunner) Output(_ context.Context, argv, _ []string) ([]byte, erro
 		if f.mintErr != nil {
 			return nil, f.mintErr
 		}
-		return []byte("ssh-ed25519 AAAAC3NzaFAKE holder:reader\n"), nil
+		return []byte("ssh-ed25519 AAAAC3NzaFAKEAAA holder:reader\n"), nil
 	}
 	return nil, nil
 }

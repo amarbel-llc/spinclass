@@ -2,6 +2,7 @@ package keyholder
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -91,7 +92,7 @@ func (f *fakeRunner) Output(_ context.Context, argv, env []string) ([]byte, erro
 		if !hasEnvPrefix(env, "SSH_AUTH_SOCK=") {
 			f.t.Errorf("mint ran without SSH_AUTH_SOCK: %v", env)
 		}
-		return []byte("ssh-ed25519 AAAAC3NzaKEY" + string(rune('A'+f.mintN)) + " holder:reader\n"), nil
+		return []byte("ssh-ed25519 " + base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("key-blob-%d", f.mintN))) + " holder:reader\n"), nil
 	}
 	return nil, nil
 }

@@ -68,7 +68,12 @@ type Pair struct {
 	FibbyUnit string    `json:"fibby_unit"`
 	AgentUnit string    `json:"agent_unit"`
 	PublicKey string    `json:"public_key"`
-	MintedAt  time.Time `json:"minted_at"`
+	// Fingerprint is the key's SHA256 fingerprint, recorded at the mint.
+	Fingerprint string    `json:"fingerprint,omitempty"`
+	MintedAt    time.Time `json:"minted_at"`
+	// Reminted is non-nil only on the Pair a Start call returned after it
+	// replaced a LOST pair: the session has a different key now.
+	Reminted *Remint `json:"-"`
 	// Dir is the session's directory; AgentSock is the holder's agent socket,
 	// the only socket a session is ever pointed at.
 	Dir       string `json:"-"`
@@ -100,7 +105,7 @@ func SessionDir(base, sessionKey string) string { return filepath.Join(base, Has
 
 // CertPath is where a certificate handed to the session is installed.
 func CertPath(base, sessionKey string) string {
-	return filepath.Join(SessionDir(base, sessionKey), "cert.pub")
+	return CertPathIn(SessionDir(base, sessionKey))
 }
 
 func (l *Launcher) logf(format string, args ...any) {
@@ -222,14 +227,26 @@ func (l *Launcher) launch(ctx context.Context, sessionKey string, ly layout) (Pa
 	if err != nil {
 		return Pair{}, fmt.Errorf("minting the holder key: %w", err)
 	}
+	fp, err := Fingerprint(pub)
+	if err != nil {
+		return Pair{}, fmt.Errorf("minting the holder key: %w", err)
+	}
 	pair := Pair{
 		Session: sessionKey, FibbyUnit: ly.fibbyUnit, AgentUnit: ly.agentUnit,
-		PublicKey: pub, MintedAt: time.Now().UTC(), Dir: ly.dir, AgentSock: ly.agent,
+		PublicKey: pub, Fingerprint: fp, MintedAt: time.Now().UTC(), Dir: ly.dir, AgentSock: ly.agent,
 	}
 	if err := writeRecord(ly.record, pair); err != nil {
 		return Pair{}, err
 	}
-	l.logf("keyholder: started a pair for %s (%s)", sessionKey, fingerprintHint(pub))
+	rm, err := l.noteMint(sessionKey, pair)
+	if err != nil {
+		return Pair{}, err
+	}
+	pair.Reminted = rm
+	if rm != nil {
+		l.logf("keyholder: the key of %s CHANGED: old %s, new %s: any certificate for the old key is void", sessionKey, rm.OldFingerprint, rm.NewFingerprint)
+	}
+	l.logf("keyholder: started a pair for %s (%s)", sessionKey, fp)
 	return pair, nil
 }
 
@@ -240,6 +257,11 @@ func (l *Launcher) Stop(ctx context.Context, sessionKey string) error {
 	ly := l.layoutFor(sessionKey)
 	if err := l.teardown(ctx, ly); err != nil {
 		return err
+	}
+	// A pair stopped on purpose ends the session's key history; one that was
+	// merely lost keeps it, so the next mint is known to be a change.
+	if err := os.Remove(LastPath(l.Base, sessionKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("removing the key history of %s: %w", sessionKey, err)
 	}
 	l.logf("keyholder: stopped the pair for %s", sessionKey)
 	return nil
@@ -362,18 +384,6 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-func fingerprintHint(pub string) string {
-	f := strings.Fields(pub)
-	if len(f) < 2 {
-		return "key"
-	}
-	k := f[1]
-	if len(k) > 16 {
-		k = k[len(k)-16:]
-	}
-	return "key ending " + k
-}
-
 func readRecord(path string) (Pair, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -382,6 +392,9 @@ func readRecord(path string) (Pair, bool) {
 	var p Pair
 	if json.Unmarshal(b, &p) != nil || p.PublicKey == "" || p.FibbyUnit == "" || p.AgentUnit == "" {
 		return Pair{}, false
+	}
+	if p.Fingerprint == "" {
+		p.Fingerprint, _ = Fingerprint(p.PublicKey)
 	}
 	return p, true
 }
