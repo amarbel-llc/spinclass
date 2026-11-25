@@ -1435,6 +1435,22 @@ an agent could otherwise raise its own bound.
 	busy too long. A merge or check job running for the session excuses it. Unset,
 	unparseable or non-positive means 60m.
 
+## [keyholder]
+
+The per-session key holder (docs/plans/2026-11-25-key-holder.md). Not merged:
+read only from the global and parent-directory layers, last valid one wins; a
+repo- or worktree-level table is ignored with a warning (*sc validate* warns),
+because the switch changes what a session can sign with and is the operator's.
+
+*mode*
+	*"off"* or *"on"*; unset means *"off"*. With *"on"* every session started or
+	resumed gets its own fibby and key holder, as transient user units, and its
+	*SSH_AUTH_SOCK* points at the holder's agent socket instead of the operator's.
+	For a session that is not confined this is delegation hygiene, not a
+	boundary. Switching it *"off"* leaves no pair, unit or directory for new
+	sessions. *sc session-key SESSION* prints the session's public key and
+	fingerprint. Any other value is an error and leaves the key holder off.
+
 ## [host-queue]
 
 Host-wide gate policy (#424,

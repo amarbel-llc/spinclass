@@ -344,6 +344,17 @@ type Health struct {
 	BusyBound *string `toml:"busy-bound"`
 }
 
+// Keyholder is the per-session key holder switch (docs/plans/2026-11-25-key-holder.md):
+// with mode "on" every session gets its own fibby + holder pair and its agent
+// socket replaces the operator's. Like Confinement it is the operator's, trusted
+// only from layers above the repo, read ONLY through
+// sweatfileio.TrustedKeyholderMode, and never merged.
+type Keyholder struct {
+	// Mode is "off" or "on"; unset means off. The last trusted layer that sets
+	// it wins. Any other value is refused by sweatfileio.ParseKeyholderMode.
+	Mode *string `toml:"mode"`
+}
+
 // HostQueue is host-wide gate policy (#424,
 // docs/plans/2026-11-10-424-host-admission-queue-follow-up.md). It is host
 // policy, so like Health it is trusted only from layers above the repo, read
@@ -570,6 +581,7 @@ type Sweatfile struct {
 	Folio          *Folio          `toml:"folio"`
 	Health         *Health         `toml:"health"`
 	HostQueue      *HostQueue      `toml:"host-queue"`
+	Keyholder      *Keyholder      `toml:"keyholder"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`

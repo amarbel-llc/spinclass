@@ -924,6 +924,29 @@ func CheckHostQueue(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	}}
 }
 
+// CheckKeyholder reports on [keyholder]: a repo-level table warns once (the
+// switch is the operator's, read only above the repo, so it is ignored there),
+// and an invalid mode is an error in any layer.
+func CheckKeyholder(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if sf.Keyholder == nil {
+		return nil
+	}
+	var issues []Issue
+	if sf.Keyholder.Mode != nil {
+		if _, err := sweatfileio.ParseKeyholderMode(*sf.Keyholder.Mode); err != nil {
+			issues = append(issues, Issue{Message: err.Error(), Severity: SeverityError, Field: "keyholder.mode"})
+		}
+	}
+	if !layerAboveRepo {
+		issues = append(issues, Issue{
+			Message:  "[keyholder] is set in a repo-level sweatfile: it is ignored — the key holder switch is read only from sweatfiles above the repo; move it to the global sweatfile",
+			Severity: SeverityWarning,
+			Field:    "keyholder",
+		})
+	}
+	return issues
+}
+
 // CheckHostQueueValues reports a [host-queue] value the queue cannot use (#424
 // step 4): a size, duration or bound hostqueue.ConfigFrom refuses. The layer is
 // judged on its own over the defaults, whatever enable says, so a bad value is
@@ -1456,6 +1479,14 @@ func Run(w io.Writer, home, repoDir string) int {
 		}
 		for _, iss := range CheckHostQueueValues(src.File) {
 			sub.NotOk("host-queue valid", map[string]string{"severity": iss.Severity, "message": iss.Message})
+		}
+
+		for _, iss := range CheckKeyholder(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
+			if iss.Severity == SeverityError {
+				sub.NotOk("keyholder valid", map[string]string{"severity": iss.Severity, "message": iss.Message})
+			} else {
+				sub.Ok(fmt.Sprintf("keyholder valid # warning: %s", iss.Message))
+			}
 		}
 
 		for _, iss := range CheckPrinciplesFile(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
