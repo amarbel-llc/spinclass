@@ -59,7 +59,7 @@ func TestBridgedCallIsConfinedWhateverTheServeClassifies(t *testing.T) {
 					t.Errorf("%s: refusal %q, want the table text %q", h.tool, res.Text, specific)
 				}
 			} else {
-				for _, want := range []string{"refused: ", h.tool, "not available to a session inside its unit", "ask the operator", "`" + h.operatorCommand + "`"} {
+				for _, want := range []string{"refused: " + h.tool + " is not available to a session inside its unit; tell the session's holder or the operator, who run `" + h.operatorCommand + "` at a terminal outside the unit"} {
 					if !strings.Contains(res.Text, want) {
 						t.Errorf("%s: refusal %q does not contain %q", h.tool, res.Text, want)
 					}

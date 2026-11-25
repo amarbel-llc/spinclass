@@ -129,6 +129,13 @@ the bridge (the text off the bridge is unchanged):
 | the recorded principal is not one the hand-off can name | `refused: restart-this-session cannot restart this session because its recorded principal is not one the restart hand-off can name; the operator at a terminal outside the unit can inspect it with `sc list`` |
 | posture rules (reached through `restart-child-session`; a bridged `restart-this-session` is refused earlier for any `posture`) | each is `refused: ` with the rule and `the operator at a terminal outside the unit` or the trusted setting the operator sets; a session widening itself: `refused: a session may not widen its own permissions; a holder with the right "restart" on this session, or the operator at a terminal outside the unit, can restart it into the attended posture` |
 
+A verb with no named right that a session inside its unit could hold (every
+other gated verb, should one reach a bridged stream) is refused with the generic
+text `refused: <tool> is not available to a session inside its unit; tell the
+session's holder or the operator, who run `<command>` at a terminal outside the
+unit`. A session inside its unit has no channel to ask anyone, so the text
+names who runs the command, not whom to ask.
+
 An error is not a rule: a hand-off that will not exec, an unreadable sweatfile or
 a failed write stays a tool result with `isError`, logged and counted as `error`.
 Arguments that do not parse likewise. A call to a tool outside the five
