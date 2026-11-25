@@ -216,6 +216,10 @@ type unitSpecInput struct {
 	// (.envrc, CLAUDE.md) that exist, resolved by harnessRootFileBinds; they are
 	// read-only binds under the same opt-in.
 	harnessRootFiles []string
+	// holderSock is the session's key holder agent socket (decision 3 of the key
+	// holder note): when set, it is the ONLY agent socket the unit gets and
+	// sshAuthSock is not bound. "" is the key holder off.
+	holderSock string
 }
 
 var unitNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
@@ -297,10 +301,46 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		env[spawnhandshake.DirEnv] = in.handshakeDir
 		spec.Env = env
 	}
-	if in.sshAuthSock != "" {
+	switch {
+	case in.holderSock != "":
+		// The key holder is on: the session's own holder is the only agent socket
+		// the unit gets, set as SSH_AUTH_SOCK (clown accepts that variable only
+		// for a path in its own sockets[]). The operator's agent is never bound.
+		env := map[string]string{}
+		maps.Copy(env, spec.Env)
+		env["SSH_AUTH_SOCK"] = in.holderSock
+		spec.Env = env
+		spec.Sockets = []unitSocket{{Path: in.holderSock, Purpose: keyHolderSocketPurpose}}
+	case in.sshAuthSock != "":
 		spec.Sockets = []unitSocket{{Path: in.sshAuthSock, Purpose: "piggy-agent"}}
 	}
 	return spec
+}
+
+// keyHolderSocketPurpose is the sockets[] purpose of the session's key holder
+// agent socket.
+const keyHolderSocketPurpose = "key-holder"
+
+// keyHolderSocketFor validates the key holder's agent socket named by the
+// session environment the pair start returned. The key holder being on and the
+// socket being unusable refuses the launch: it never falls back to the
+// operator's agent.
+func keyHolderSocketFor(kh map[string]string) (string, error) {
+	p := kh["SSH_AUTH_SOCK"]
+	if p == "" {
+		return "", errors.New("the key holder is on but its agent socket is unknown: refusing to launch the confined unit (it would otherwise be given the operator's agent)")
+	}
+	if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+		return "", fmt.Errorf("the key holder's agent socket %q is not a clean absolute path: refusing to launch the confined unit", p)
+	}
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return "", fmt.Errorf("the key holder's agent socket %s is not there (%v): refusing to launch the confined unit; the operator's agent is never used instead", p, err)
+	}
+	if fi.Mode()&os.ModeSocket == 0 {
+		return "", fmt.Errorf("the key holder's agent path %s is not a socket (mode %s): refusing to launch the confined unit", p, fi.Mode().Type())
+	}
+	return p, nil
 }
 
 // refuseProtectedBinds fails a spec that binds or exposes a protected state
@@ -446,7 +486,17 @@ func stickyAgentSocket(stateDir, wt string) string {
 // writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
 // it beside the unit record, outside the worktree. It returns the path to put
 // in CLOWN_AGENT_SCOPE.
-func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string, harnessConfigWritable bool, dotenv []string) (string, error) {
+func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string, harnessConfigWritable bool, dotenv []string, keyholderEnv map[string]string) (string, error) {
+	// keyholderEnv non-nil is the key holder being on: its agent socket is the
+	// unit's only agent socket, and a missing or unusable one refuses the launch
+	// before anything is written (never a fallback to the operator's agent).
+	holderSock := ""
+	if keyholderEnv != nil {
+		var herr error
+		if holderSock, herr = keyHolderSocketFor(keyholderEnv); herr != nil {
+			return "", herr
+		}
+	}
 	commonDir, err := gitCommonDir(rp.AbsPath)
 	if err != nil || commonDir == "" {
 		return "", fmt.Errorf("resolving the git common dir of %s: %v", rp.AbsPath, err)
@@ -474,13 +524,16 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	// spinclass's whole contribution to the unit's environment: the dotenv a
 	// trusted layer declared, the tmp dirs and the identity (spinclass#462).
 	env := confinedSpecEnv(rp, desc, dotenv)
-	sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
-	if sshAuthSock == "" {
-		sshAuthSock = stickyAgentSocket(stateDir, rp.AbsPath)
+	sshAuthSock := ""
+	if holderSock == "" { // the key holder off: the operator's agent, as before
+		sshAuthSock = os.Getenv("SSH_AUTH_SOCK")
+		if sshAuthSock == "" {
+			sshAuthSock = stickyAgentSocket(stateDir, rp.AbsPath)
+		}
 	}
 	spec := buildUnitSpec(unitSpecInput{
 		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
-		sshAuthSock: sshAuthSock, runtimeDir: runtimeDir, wayland: wayland,
+		sshAuthSock: sshAuthSock, holderSock: holderSock, runtimeDir: runtimeDir, wayland: wayland,
 		egress: egress, env: env, handshakeDir: handshakeDir,
 		harnessConfigWritable: harnessConfigWritable, harnessRootFiles: rootFiles,
 	})

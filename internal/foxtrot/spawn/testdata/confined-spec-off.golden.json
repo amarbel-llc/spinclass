@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "worktree": "/w/repo/.worktrees/feat",
+  "operator_home": "/home/op",
+  "unit_name_hint": "spinclass-agent-repo-feat",
+  "result_path": "/state/spinclass/spinclass/units/0e338adc07233e29.json",
+  "binds_rw": [
+    "/w/repo/.worktrees/feat",
+    "/w/repo/.git/objects",
+    "/w/repo/.git/worktrees/feat",
+    "/state/spinclass/handshake/abc"
+  ],
+  "binds_ro": [
+    "/w/repo/.git/config",
+    "/w/repo/.git/hooks",
+    "/w/repo/.git/refs",
+    "/w/repo/.git/logs",
+    "/w/repo/.worktrees/feat/.spinclass/hooks",
+    "/w/repo/.git/worktrees/feat/config.worktree",
+    "/w/repo/.worktrees/feat/.git",
+    "/w/repo/.worktrees/feat/.claude",
+    "/w/repo/.worktrees/feat/.mcp.json"
+  ],
+  "sockets": [
+    {
+      "path": "/run/user/1000/piggy-agent.sock",
+      "purpose": "piggy-agent"
+    }
+  ],
+  "deny_paths": [
+    "/run/user/1000/bus",
+    "/run/user/1000/systemd",
+    "/run/user/1000/posh",
+    "/tmp/.X11-unix",
+    "/run/user/1000/wayland-0"
+  ],
+  "egress_allow": [
+    "example.org:443"
+  ],
+  "env": {
+    "SPINCLASS_HANDSHAKE_DIR": "/state/spinclass/handshake/abc",
+    "SPINCLASS_WORKTREE": "/w/repo/.worktrees/feat",
+    "TMPDIR": "/w/repo/.worktrees/feat/.tmp"
+  }
+}

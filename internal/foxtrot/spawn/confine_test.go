@@ -401,7 +401,7 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	rp := worktree.ResolvedPath{AbsPath: wt, SessionKey: "repo/feat"}
 
-	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state, "", false, nil)
+	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state, "", false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/piggy-agent.sock")
-	path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil)
+	path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "")
-	path, err = writeUnitSpec(rp, "desc", nil, state, "", false, nil)
+	path, err = writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/other.sock")
-	path, err = writeUnitSpec(rp, "desc", nil, state, "", false, nil)
+	path, err = writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

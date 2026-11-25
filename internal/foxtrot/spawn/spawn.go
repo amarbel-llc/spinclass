@@ -240,23 +240,47 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	// (confined) the unit spec; nil when no trusted layer declares any.
 	dotenv := apply.DotenvPairs(merged, rp.AbsPath)
 
+	// The session's key holder pair starts BEFORE the confined unit spec is
+	// written: the spec binds the holder's socket in place of the operator's
+	// agent, so the socket must exist (kh is nil when [keyholder] is off).
+	var undoKeyholder func()
+	var kh map[string]string
+	if KeyholderEnv != nil {
+		var undo func()
+		var err error
+		kh, undo, err = KeyholderEnv(home, repoPath, rp.SessionKey)
+		if err != nil {
+			undoOnFailure()
+			return Pending{}, err
+		}
+		undoKeyholder = undo
+	}
+	// undoStart rolls back what this start created: the pair (only when this
+	// start launched it) and the worktree.
+	undoStart := func() {
+		if undoKeyholder != nil {
+			undoKeyholder()
+		}
+		undoOnFailure()
+	}
+
 	var confine *confinedLaunch
 	if confined {
 		stateDir, err := confinementStateDir()
 		if err != nil {
-			undoOnFailure()
+			undoStart()
 			return Pending{}, err
 		}
 		// The frontend creates the worker's hello dir before the unit starts: a
 		// bind needs an existing source, and the unit cannot create it.
 		handshakeDir := spawnhandshake.SessionDir(stateDir, rp.AbsPath)
 		if err := os.MkdirAll(handshakeDir, 0o755); err != nil {
-			undoOnFailure()
+			undoStart()
 			return Pending{}, fmt.Errorf("creating the worker's handshake dir: %w", err)
 		}
-		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable, dotenv)
+		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable, dotenv, kh)
 		if err != nil {
-			undoOnFailure()
+			undoStart()
 			return Pending{}, err
 		}
 		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir, handshakeDir: handshakeDir}
@@ -266,14 +290,7 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	// resume`, so it goes into the spawn env and the pinned resume env alike.
 	pinned := shop.PinEntry(merged)
 	sessionEnv = setUnattendedMarker(sessionEnv, unattended)
-	var undoKeyholder func()
-	if KeyholderEnv != nil {
-		kh, undo, err := KeyholderEnv(home, repoPath, rp.SessionKey)
-		if err != nil {
-			undoOnFailure()
-			return Pending{}, err
-		}
-		undoKeyholder = undo
+	if kh != nil {
 		sessionEnv = withKeyholderEnv(sessionEnv, kh)
 	}
 	pinned.Env = setUnattendedMarker(pinned.Env, unattended)
