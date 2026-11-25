@@ -48,6 +48,10 @@ const (
 	// The code is the same ERR refused, which the shim retries.
 	NotReadyText = "refused: the bridge does not know this unit's cgroup yet; try again shortly"
 
+	// StoppedText is the refusal of a verb call that met a hard readiness
+	// failure: the listener is ending and the serve log says why.
+	StoppedText = "refused: the bridge for this session has stopped; the serve log says why"
+
 	writeTimeout      = 2 * time.Second
 	busyWriteTimeout  = 100 * time.Millisecond
 	staleProbeTimeout = time.Second
@@ -150,6 +154,17 @@ type Options struct {
 	// and the uid check). It exists for tests that need a connection decided
 	// without a unit; production code leaves it nil.
 	PeerCheck func(conn net.Conn, unit string) error
+	// Ready says whether the session service may be served yet. It gates
+	// ONLY the session service, per call, and only for a peer the exact check
+	// already admitted; control is admitted on identity alone (clown writes
+	// the unit record after the provider starts, which starts after the
+	// shim's control stream is ready). nil means ready. A *NotReadyError means
+	// "not yet": the call is answered ERR refused and the listener lives. Any
+	// other error is a hard failure (the mapping names another session, a
+	// record written after this serve started names another unit): the call is
+	// refused and the listener declares itself dead. It is also asked on every
+	// socket tick, so a hard failure ends the listener without a connection.
+	Ready func() error
 	// Observer receives one Event per connection; nil is a no-op.
 	Observer Observer
 	// HelloTimeout overrides bridge.HelloTimeout (tests).
@@ -395,6 +410,51 @@ type closeHandler struct{}
 
 func (closeHandler) Serve(context.Context, net.Conn, Caller) {}
 
+// NotReadyError is Options.Ready's answer while a condition the session
+// service waits for has not come true yet. Reason is one short line that names
+// the condition and carries nothing secret.
+type NotReadyError struct{ Reason string }
+
+func (e *NotReadyError) Error() string { return "bridge not ready: " + e.Reason }
+
+// NotReadyReasonText is the text of the ERR refused a verb call gets while the
+// session service is not ready: one line, bounded.
+func NotReadyReasonText(reason string) string {
+	reason = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, reason)
+	if len(reason) > 200 {
+		reason = reason[:200]
+	}
+	return "refused: the bridge is not ready yet: " + reason
+}
+
+// readiness consults Options.Ready for a session call. text is the refusal when
+// err is set; hard says the failure ends the listener.
+func (s *Server) readiness() (text string, hard bool, err error) {
+	if s.opts.Ready == nil {
+		return "", false, nil
+	}
+	err = s.opts.Ready()
+	if err == nil {
+		return "", false, nil
+	}
+	var nr *NotReadyError
+	if errors.As(err, &nr) {
+		return NotReadyReasonText(nr.Reason), false, err
+	}
+	return StoppedText, true, err
+}
+
+// cgroupNamesUnit reports whether a cgroup path is the named unit's: the unit
+// the launcher exported, read from the environment alone.
+func cgroupNamesUnit(cg, unit string) bool {
+	return strings.HasSuffix(cg, "/clown-agent.slice/"+unit)
+}
+
 // checkPeer decides one connection. text is the refusal's text when err is
 // set. Not being in the unit and not being able to tell are the same answer
 // (ERR refused); the text differs only for a cgroup file that is not (yet)
@@ -414,6 +474,11 @@ func (s *Server) checkPeer(conn net.Conn) (text string, err error) {
 		return NotReadyText, err
 	}
 	s.cgroupSeen.Store(true)
+	// The file must name the unit clown exported: a cgroup that is not this
+	// unit's admits nobody (no unit record is read for this).
+	if s.unit != "" && !cgroupNamesUnit(cg, s.unit) {
+		return RefusedPeerText, fmt.Errorf("the cgroup file names %s, not the unit %s", cg, s.unit)
+	}
 	if err := s.opts.CheckPeer(conn, cg); err != nil {
 		return RefusedPeerText, err
 	}
@@ -685,6 +750,10 @@ func (s *Server) watchSocket() {
 				s.declareDead(err)
 				return
 			}
+			if _, hard, err := s.readiness(); err != nil && hard {
+				s.declareDead(fmt.Errorf("bridge: %w", err))
+				return
+			}
 		}
 	}
 }
@@ -824,6 +893,21 @@ func (s *Server) handle(conn net.Conn) {
 			outcome = bridge.CodeVersion
 		}
 		return
+	}
+
+	// Only the session service waits for readiness; control is admitted on
+	// identity alone (it must be, for the provider to start).
+	if h.Service == ServiceSession {
+		if text, hard, err := s.readiness(); err != nil {
+			if hard {
+				// Not synchronously: Close waits for this very handler.
+				go s.declareDead(fmt.Errorf("bridge: %w", err))
+			}
+			s.opts.Logf("bridge refused a session call: %v", err)
+			s.refuse(conn, bridge.FormatErr(bridge.CodeRefused, text))
+			outcome = bridge.CodeRefused
+			return
+		}
 	}
 
 	release, busy := s.reserve(h.Service)

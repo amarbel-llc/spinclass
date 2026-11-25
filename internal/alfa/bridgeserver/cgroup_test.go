@@ -204,7 +204,7 @@ func TestPeerIsCheckedAgainstTheExactCgroupAndRefusedOnError(t *testing.T) {
 	}
 
 	// The file is re-read on every connection: a new content is the new want.
-	const other = "/clown-agent.slice/other.service"
+	const other = "/another.slice/clown-agent.slice/agent-test.service"
 	if err := os.WriteFile(file, []byte(other), 0o600); err != nil {
 		t.Fatal(err)
 	}

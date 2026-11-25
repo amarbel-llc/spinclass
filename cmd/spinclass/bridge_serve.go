@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"code.linenisgreat.com/clown/pkgs/peercheck"
 	"code.linenisgreat.com/spinclass/internal/0/git"
@@ -90,22 +92,66 @@ var bridgeResolve = func() bridgePlan {
 }
 
 // bridgeRecordedUnit is the agent unit the frontend recorded for the session
-// (clown writes the record once the unit is active); ok is false when there is
-// no readable record. A seam for tests.
-var bridgeRecordedUnit = func(sessionKey string) (unit string, ok bool) {
+// (clown writes the record once the provider has started) and when the record
+// was written; ok is false when there is no readable record. A seam for tests.
+var bridgeRecordedUnit = func(sessionKey string) (unit string, written time.Time, ok bool) {
 	st, err := session.FindByTarget(sessionKey)
 	if err != nil || st == nil || st.IsTombstone() || st.Key() != sessionKey {
-		return "", false
+		return "", time.Time{}, false
 	}
 	stateDir, err := confinement.DefaultStateDir()
 	if err != nil {
-		return "", false
+		return "", time.Time{}, false
 	}
 	rec, err := confinement.LoadUnitRecord(confinement.Host{}, stateDir, st.WorktreePath)
 	if err != nil {
-		return "", false
+		return "", time.Time{}, false
 	}
-	return rec.Unit, true
+	fi, err := os.Stat(confinement.UnitRecordPath(stateDir, st.WorktreePath))
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	return rec.Unit, fi.ModTime(), true
+}
+
+// bridgePrincipalMapping is the frontend's principal mapping of a principal. A
+// seam for tests.
+var bridgePrincipalMapping = func(principal string) (confinement.PrincipalMapping, error) {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return confinement.PrincipalMapping{}, err
+	}
+	return confinement.LoadPrincipalMapping(confinement.Host{}, stateDir, principal)
+}
+
+// bridgeReadiness is the listener's Ready for the session service. The
+// principal mapping and the unit record exist only after the unit is up (the
+// spawn writes the mapping after the launch; clown writes the record once the
+// provider has started), so neither can be a condition of starting, and neither
+// gates control. Until they hold a verb call is answered ERR refused:
+//
+//   - no mapping yet, or one that cannot be used: not ready;
+//   - a mapping that names ANOTHER session: hard failure at any time;
+//   - a record written before this serve started is the previous launch's and
+//     is ignored; no record at all is fine (the cgroup file admits a peer);
+//   - a record written after this serve started that names another unit than
+//     the one clown exported: hard failure.
+func bridgeReadiness(key, principal, unit string, serveStart time.Time) func() error {
+	return func() error {
+		m, err := bridgePrincipalMapping(principal)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			return &bridgeserver.NotReadyError{Reason: "the frontend has not written this session's principal mapping yet"}
+		case err != nil:
+			return &bridgeserver.NotReadyError{Reason: "the frontend's principal mapping for this session cannot be used yet"}
+		case m.SessionKey != key:
+			return fmt.Errorf("the principal's mapping names %s, not this listener's session %s", m.SessionKey, key)
+		}
+		if recorded, written, ok := bridgeRecordedUnit(key); ok && written.After(serveStart) && recorded != unit {
+			return fmt.Errorf("the unit clown named for the bridge (%s) is not the unit recorded for this session (%s)", unit, recorded)
+		}
+		return nil
+	}
 }
 
 // startBridge starts the bridge listener when the plan allows it and returns
@@ -143,25 +189,12 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 	if bridgeCheckPeer == nil {
 		return fail(bridgeserver.ErrNoPeerCheck)
 	}
-	// Every bridged call acts on the session this listener carries, so the key
-	// must be the one the frontend's own principal-to-session resolution gives
-	// this serve's principal. The principal resolves to nothing (the
-	// SessionStart stamp is not there yet), or to another session: stay off, and
-	// count it like a failed start.
-	principalKey, perr := confinement.SessionKeyOfPrincipal(currentPrincipal())
-	if perr == nil && principalKey != key {
-		perr = fmt.Errorf("the serve's principal resolves to %s, not to this listener's session %s", principalKey, key)
-	}
-	if perr != nil {
-		return fail(perr)
-	}
-	// The unit clown named must be the unit the frontend recorded for this
-	// session: a bridge for a unit the record does not name is a bridge for
-	// someone else's unit. No readable record is not a mismatch (the cgroup
-	// file is what admits a peer); a record that names another unit is.
-	if recorded, ok := bridgeRecordedUnit(key); ok && recorded != plan.Unit {
-		return fail(fmt.Errorf("the unit clown named for the bridge (%s) is not the unit recorded for this session (%s)", plan.Unit, recorded))
-	}
+	// Bind at once. Every bridged call acts on the session this listener
+	// carries, so the frontend's principal mapping must name this key, and the
+	// unit clown named must not contradict a record written after this serve
+	// started; both are checked per verb call (bridgeReadiness), not here:
+	// neither exists yet when clown starts serve and waits for the socket.
+	serveStart := time.Now()
 	log := openBridgeCrossingLog()
 	// The statsd endpoint resolves once, from the sweatfile's [metrics] and
 	// the environment, as the permission counters do.
@@ -171,6 +204,7 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 		SessionKey: key,
 		CheckPeer:  bridgeCheckPeer,
 		CgroupFile: plan.CgroupFile,
+		Ready:      bridgeReadiness(key, currentPrincipal(), plan.Unit, serveStart),
 		Handler:    newHandler(log, stats),
 		Observer:   &bridgeObserver{log: log, stats: stats, signal: bridgeWakeSignal},
 		Logf:       servelog.Errorf,
