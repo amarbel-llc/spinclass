@@ -266,18 +266,25 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	// resume`, so it goes into the spawn env and the pinned resume env alike.
 	pinned := shop.PinEntry(merged)
 	sessionEnv = setUnattendedMarker(sessionEnv, unattended)
+	var undoKeyholder func()
 	if KeyholderEnv != nil {
-		kh, err := KeyholderEnv(home, repoPath, rp.SessionKey)
+		kh, undo, err := KeyholderEnv(home, repoPath, rp.SessionKey)
 		if err != nil {
 			undoOnFailure()
 			return Pending{}, err
 		}
+		undoKeyholder = undo
 		sessionEnv = withKeyholderEnv(sessionEnv, kh)
 	}
 	pinned.Env = setUnattendedMarker(pinned.Env, unattended)
 	pinned.Posture = pinnedPostureOf(unattended)
 	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, dotenv, resolved, authorizingGrant, narrowing, pinned, confine)
 	if err != nil {
+		// The spawn failed after this start created the session's key holder pair:
+		// no session will exist to close it, so stop it here.
+		if undoKeyholder != nil {
+			undoKeyholder()
+		}
 		undoOnFailure()
 		return Pending{}, err
 	}

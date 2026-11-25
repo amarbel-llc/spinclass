@@ -73,6 +73,9 @@ type Pair struct {
 	// the only socket a session is ever pointed at.
 	Dir       string `json:"-"`
 	AgentSock string `json:"-"`
+	// Created is true only on the Pair a Start call launched afresh (a live pair
+	// it found and left alone, and one read back by Running, carry false).
+	Created bool `json:"-"`
 }
 
 // Hash is the short, stable name a session's files and units carry: the first
@@ -176,6 +179,7 @@ func (l *Launcher) Start(ctx context.Context, sessionKey string) (Pair, error) {
 		}
 		return Pair{}, err
 	}
+	pair.Created = true
 	return pair, nil
 }
 

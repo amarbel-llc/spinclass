@@ -604,7 +604,7 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 
 	merged := hierarchy.Merged
 	entry := startEntry(resolvedPath, merged, os.Stderr)
-	kh, err := keyholderSessionEnv(os.Getenv("HOME"), repoPath, resolvedPath.SessionKey, os.Stderr)
+	kh, undoKeyholder, err := keyholderSessionEnvUndo(os.Getenv("HOME"), repoPath, resolvedPath.SessionKey, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -614,7 +614,7 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 		Env:         withKeyholderEnv(entry.Env, kh),
 	}
 
-	return attachSessionFn(
+	err = attachSessionFn(
 		os.Stdout,
 		exec,
 		resolvedPath,
@@ -626,6 +626,28 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 		args.AllowStaleBase,
 		args.AllowNoCredential,
 	)
+	stopKeyholderAfterFailedStart(err, undoKeyholder, resolvedPath)
+	return err
+}
+
+// stopKeyholderAfterFailedStart stops the pair this start launched when the start
+// failed and left no session behind: nothing would ever close it. A session that
+// does exist (the failure came after it was created, or it ran and exited with an
+// error) keeps its pair; `sc close` and `sc resume` own it from there.
+func stopKeyholderAfterFailedStart(startErr error, undo func(), rp worktree.ResolvedPath) {
+	if startErr == nil || undo == nil {
+		return
+	}
+	if sessionExistsFn(rp) {
+		return
+	}
+	undo()
+}
+
+// sessionExistsFn reports whether the session has a state record; a seam for tests.
+var sessionExistsFn = func(rp worktree.ResolvedPath) bool {
+	st, err := session.Read(rp.RepoPath, rp.Branch)
+	return err == nil && st != nil
 }
 
 func runStart(_ context.Context, args json.RawMessage) error {

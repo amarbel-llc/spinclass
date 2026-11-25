@@ -26,8 +26,8 @@ var (
 )
 
 func init() {
-	spawn.KeyholderEnv = func(home, repoPath, sessionKey string) (map[string]string, error) {
-		return keyholderSessionEnv(home, repoPath, sessionKey, os.Stderr)
+	spawn.KeyholderEnv = func(home, repoPath, sessionKey string) (map[string]string, func(), error) {
+		return keyholderSessionEnvUndo(home, repoPath, sessionKey, os.Stderr)
 	}
 }
 
@@ -67,27 +67,36 @@ func launcherForTools(fibby, piggy string) (*keyholder.Launcher, error) {
 // nothing. A failure is an error and never a fall back to the operator's agent:
 // a session that was meant to run on its own key does not quietly run on his.
 func keyholderSessionEnv(home, repoPath, sessionKey string, stderr io.Writer) (map[string]string, error) {
+	kh, _, err := keyholderSessionEnvUndo(home, repoPath, sessionKey, stderr)
+	return kh, err
+}
+
+// keyholderSessionEnvUndo is keyholderSessionEnv plus an undo: non-nil only when
+// THIS call launched the session's pair (an existing live pair is left alone and
+// has nothing to undo). A launch that fails after the pair started, and so leaves
+// no session to close it, calls undo to stop the pair.
+func keyholderSessionEnvUndo(home, repoPath, sessionKey string, stderr io.Writer) (map[string]string, func(), error) {
 	h, err := sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading the sweatfiles for [keyholder]: %w", err)
+		return nil, nil, fmt.Errorf("reading the sweatfiles for [keyholder]: %w", err)
 	}
 	on, untrusted, err := sweatfileio.TrustedKeyholderMode(h, home, repoPath)
 	for _, path := range untrusted {
 		fmt.Fprintf(stderr, "spinclass: ignoring [keyholder] in %s: only layers above the repo may set it\n", path)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w (sessions are not launched until it is fixed: a wrong key holder switch must not fall back to the operator's agent)", err)
+		return nil, nil, fmt.Errorf("%w (sessions are not launched until it is fixed: a wrong key holder switch must not fall back to the operator's agent)", err)
 	}
 	if !on {
-		return nil, nil
+		return nil, nil, nil
 	}
 	l, err := keyholderLauncherFn()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pair, err := l.Start(context.Background(), sessionKey)
 	if err != nil {
-		return nil, fmt.Errorf("starting the session's key holder: %w", err)
+		return nil, nil, fmt.Errorf("starting the session's key holder: %w", err)
 	}
 	kh := map[string]string{"SSH_AUTH_SOCK": pair.AgentSock}
 	// Every other variable that names the operator's agent, set in the launching
@@ -95,7 +104,15 @@ func keyholderSessionEnv(home, repoPath, sessionKey string, stderr io.Writer) (m
 	for _, name := range keyholder.OperatorAgentVarsIn(os.Environ()) {
 		kh[name] = ""
 	}
-	return kh, nil
+	var undo func()
+	if pair.Created {
+		undo = func() {
+			if err := l.Stop(context.Background(), sessionKey); err != nil {
+				fmt.Fprintf(stderr, "spinclass: stopping the key holder pair of %s after a failed launch: %v\n", sessionKey, err)
+			}
+		}
+	}
+	return kh, undo, nil
 }
 
 // withKeyholderEnv returns env with the key holder's variables laid over it

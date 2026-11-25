@@ -10,8 +10,10 @@ import (
 // points a new worker at its own key holder in place of the operator's agent,
 // starting the pair if the [keyholder] switch is on; nil when it is off. An
 // error refuses the spawn: a worker that was meant to run on its own key must
-// not launch on the operator's.
-var KeyholderEnv func(home, repoPath, sessionKey string) (map[string]string, error)
+// not launch on the operator's. undo is non-nil only when THIS call created the
+// pair; the spawn calls it if the launch then fails, since no session will exist
+// to close the pair.
+var KeyholderEnv func(home, repoPath, sessionKey string) (env map[string]string, undo func(), err error)
 
 // withKeyholderEnv returns sessionEnv with kh laid over it and every other
 // variable that names the operator's agent emptied, including one a configured
