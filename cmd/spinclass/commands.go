@@ -77,6 +77,7 @@ func buildApp() *command.App {
 	registerSessionJobsCommand(app)
 	registerConfinementCheckCommand(app)
 	registerConfinementBindCommand(app)
+	registerSessionKeyCommand(app)
 	registerVersionCommand(app)
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)
