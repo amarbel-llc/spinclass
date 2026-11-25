@@ -79,10 +79,13 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder) brid
 		return nil
 	}
 	log := openBridgeCrossingLog()
+	// The statsd endpoint resolves once, from the sweatfile's [metrics] and
+	// the environment, as the permission counters do.
+	sf, loaded := mergedSweatfileForCwd()
 	return startBridgeFrom(ctx, plan, bridgeserver.Options{
 		SessionKey: key,
 		Handler:    newHandler(log),
-		Observer:   &bridgeObserver{log: log},
+		Observer:   &bridgeObserver{log: log, stats: permissionStatsdClient(sf, loaded)},
 		Logf:       servelog.Errorf,
 	})
 }

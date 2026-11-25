@@ -174,9 +174,9 @@ func (l *Log) Record(c Crossing) {
 	e := Entry{
 		TS:         now.UTC().Format(time.RFC3339Nano),
 		Session:    c.Session,
-		Service:    serviceLabel(c.Service),
+		Service:    ServiceLabel(c.Service),
 		Verb:       verbLabel(c.Verb),
-		Outcome:    normalizeOutcome(c.Outcome),
+		Outcome:    NormalizeOutcome(c.Outcome),
 		DurationMS: c.Duration.Milliseconds(),
 		ReqBytes:   c.ReqBytes,
 		RespBytes:  c.RespBytes,
@@ -357,9 +357,9 @@ func identByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '/' || c == '-'
 }
 
-// serviceLabel is the closed set of reserved services; anything else is
-// "unknown" so no attacker text reaches the line.
-func serviceLabel(s string) string {
+// ServiceLabel is the closed set of reserved services; anything else is
+// "unknown" so no attacker text reaches a line or a metric name.
+func ServiceLabel(s string) string {
 	for _, r := range bridge.ReservedServices {
 		if r == s {
 			return s
@@ -376,8 +376,9 @@ func verbLabel(v string) string {
 	return v
 }
 
-// normalizeOutcome maps a listener outcome onto the log's closed set.
-func normalizeOutcome(o string) string {
+// NormalizeOutcome maps a listener outcome onto the closed set of outcomes
+// (ok, refused, error, busy, hello-timeout).
+func NormalizeOutcome(o string) string {
 	switch o {
 	case OutcomeOK, OutcomeRefused, OutcomeBusy, OutcomeHelloTimeout:
 		return o
