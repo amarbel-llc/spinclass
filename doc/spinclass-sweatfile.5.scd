@@ -1443,9 +1443,17 @@ repo- or worktree-level table is ignored with a warning (*sc validate* warns),
 because the switch changes what a session can sign with and is the operator's.
 
 *mode*
-	*"off"* or *"on"*; unset means *"off"*. With *"on"* every session started or
-	resumed gets its own fibby and key holder, as transient user units, and its
-	*SSH_AUTH_SOCK* points at the holder's agent socket instead of the operator's.
+	*"off"* or *"on"*; unset means *"off"*. With *"on"* every WORKER session
+	started or resumed gets its own fibby and key holder, as transient user
+	units, and its *SSH_AUTH_SOCK* points at the holder's agent socket instead of
+	the operator's. The operator's own launch, the *driver*, keeps his agent and
+	gets no pair: a launch is the driver's only when *sc start* or *sc resume* is
+	run with stdin and stdout both terminals, with neither *CLOWN_SESSION_ID* nor
+	*SPINCLASS_SESSION_ID* in the environment, and the session's record names no
+	spawner. Every spawned worker, anything piped or run inside a session, and
+	any session whose record names a spawner (even resumed by the operator at his
+	terminal) is a worker. An implicit session (an agent started in a main
+	checkout outside spinclass) is not launched by spinclass and gets no pair.
 	For a session that is not confined this is delegation hygiene, not a
 	boundary. Switching it *"off"* leaves no pair, unit or directory for new
 	sessions. *sc session-key SESSION* prints the session's public key and
