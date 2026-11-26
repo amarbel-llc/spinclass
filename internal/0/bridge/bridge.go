@@ -16,6 +16,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -208,6 +209,48 @@ func SocketPath(dir string) (string, error) {
 // DownMessage is the fixed text the shim prints when the bridge is down.
 func DownMessage(reason string) string {
 	return fmt.Sprintf("clown: the bridge is down (%s); no tool or model call can leave this session; the session's frontend is gone or restarting", reason)
+}
+
+// MaxUnusableReasonBytes bounds the reason UnusableMessage prints: the reason
+// is cut at a rune boundary to at most this many bytes and then ends in "...".
+// DownMessage applies no bound of its own; its reasons are the shim's own fixed
+// strings.
+const MaxUnusableReasonBytes = 200
+
+// UnusableMessage is the fixed text the shim prints when the bridge cannot be
+// used although a frontend answered or was reachable: an "ERR version" on
+// control or on a data stream (the reason is the server's text), or a control
+// stream that was not admitted within the shim's retry window (the reason is
+// the last refusal text). DownMessage stays for an unreachable bridge and an
+// ended control stream.
+//
+// The reason is printed on one line with no control characters: every control
+// rune, every format rune (the bidi overrides among them), the unicode line and
+// paragraph separators and every byte that is not valid UTF-8 becomes one
+// space, and what remains is cut to MaxUnusableReasonBytes.
+func UnusableMessage(reason string) string {
+	return fmt.Sprintf("clown: the bridge is unusable (%s); no tool or model call can leave this session; check the serve's log and spinclass session-health, and that the session's bridge setting matches the serve's", boundedReason(reason))
+}
+
+func boundedReason(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == utf8.RuneError, unicode.IsControl(r), unicode.Is(unicode.Cf, r), r == ' ', r == ' ':
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	clean := b.String()
+	if len(clean) <= MaxUnusableReasonBytes {
+		return clean
+	}
+	cut := MaxUnusableReasonBytes
+	for cut > 0 && !utf8.RuneStart(clean[cut]) {
+		cut--
+	}
+	return clean[:cut] + "..."
 }
 
 // readLine reads up to limit bytes, one at a time, stopping after the first

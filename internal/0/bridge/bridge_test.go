@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 )
 
 // gen builds a long string without writing it out in the vectors file.
@@ -53,9 +55,11 @@ type vector struct {
 	PathGen *gen   `json:"path_gen"`
 	PathLen int    `json:"path_len"`
 	PathErr string `json:"path_err"`
-	// down-message
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
+	// down-message and unusable-message; the _gen forms keep long cases short
+	Reason     string `json:"reason"`
+	ReasonGen  *gen   `json:"reason_gen"`
+	Message    string `json:"message"`
+	MessageGen *gen   `json:"message_gen"`
 	// constants
 	Constants map[string]any `json:"constants"`
 }
@@ -65,6 +69,20 @@ func (v vector) input() string {
 		return v.InputGen.String()
 	}
 	return v.Input
+}
+
+func (v vector) reason() string {
+	if v.ReasonGen != nil {
+		return v.ReasonGen.String()
+	}
+	return v.Reason
+}
+
+func (v vector) message() string {
+	if v.MessageGen != nil {
+		return v.MessageGen.String()
+	}
+	return v.Message
 }
 
 func (v vector) wantReply() string {
@@ -162,6 +180,10 @@ func TestVectors(t *testing.T) {
 			case "down-message":
 				if got := DownMessage(v.Reason); got != v.Message {
 					t.Errorf("DownMessage(%q) = %q, want %q", v.Reason, got, v.Message)
+				}
+			case "unusable-message":
+				if got := UnusableMessage(v.reason()); got != v.message() {
+					t.Errorf("UnusableMessage(%d bytes) = %q, want %q", len(v.reason()), got, v.message())
 				}
 			case "constants":
 				runConstants(t, v)
@@ -334,7 +356,7 @@ func TestEveryVectorOpIsCovered(t *testing.T) {
 	for _, v := range loadVectors(t) {
 		seen[v.Op] = true
 	}
-	for _, op := range []string{"hello", "reply", "format-err", "socket-path", "down-message", "constants"} {
+	for _, op := range []string{"hello", "reply", "format-err", "socket-path", "down-message", "unusable-message", "constants"} {
 		if !seen[op] {
 			t.Errorf("no vector for op %q", op)
 		}
@@ -431,6 +453,34 @@ func TestSocketPath(t *testing.T) {
 	}
 	if _, err := SocketPath(""); err == nil {
 		t.Error("an empty directory was accepted")
+	}
+}
+
+// A byte that is not valid UTF-8 cannot be written in the vectors file (JSON is
+// UTF-8), so that case lives here: each such byte becomes one space.
+func TestUnusableMessageTurnsInvalidUTF8IntoSpaces(t *testing.T) {
+	got := UnusableMessage("a\xffb\xc3(c")
+	want := "clown: the bridge is unusable (a b (c); no tool or model call can leave this session; check the serve's log and spinclass session-health, and that the session's bridge setting matches the serve's"
+	if got != want {
+		t.Errorf("UnusableMessage = %q, want %q", got, want)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("the message is not valid UTF-8: %q", got)
+	}
+}
+
+func TestUnusableMessageNeverHoldsAControlOrFormatRuneOrExceedsItsBound(t *testing.T) {
+	const fixed = len("clown: the bridge is unusable (); no tool or model call can leave this session; check the serve's log and spinclass session-health, and that the session's bridge setting matches the serve's")
+	for _, in := range []string{"x‮y", "a\u0085b", "tab\there", "\x7fdel", strings.Repeat("‮", 300), strings.Repeat("é", 500)} {
+		got := UnusableMessage(in)
+		for _, r := range got {
+			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == ' ' || r == ' ' {
+				t.Errorf("UnusableMessage(%q) holds the rune %U", in, r)
+			}
+		}
+		if len(got) > fixed+MaxUnusableReasonBytes+len("...") {
+			t.Errorf("UnusableMessage(%q) is %d bytes, over the bound", in, len(got))
+		}
 	}
 }
 
