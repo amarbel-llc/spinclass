@@ -182,12 +182,18 @@ func TestSessionKeyRefusalsNameCommandsTheOperatorCanRun(t *testing.T) {
 		want   []string
 	}{
 		{"no pair", func(*testing.T, *sessionKeyEnv) {}, "none", []string{"`sc resume repo/none`"}},
-		{"dead pair", func(t *testing.T, e *sessionKeyEnv) { e.makeSessionDir(t, "down"); e.live = false }, "down",
-			[]string{"`sc keyholder-stop repo/down`", "`sc resume repo/down`"}},
-		{"no recorded fingerprint", func(t *testing.T, e *sessionKeyEnv) { e.makeSessionDir(t, "a"); e.pair.Fingerprint = "" }, "a",
-			[]string{"`sc keyholder-stop repo/a`", "`sc resume repo/a`"}},
-		{"changed key", func(t *testing.T, e *sessionKeyEnv) { e.makeSessionDir(t, "a"); e.pair.Fingerprint = "SHA256:RECORDED" }, "a",
-			[]string{"`sc keyholder-stop repo/a`", "`sc resume repo/a`"}},
+		{
+			"dead pair", func(t *testing.T, e *sessionKeyEnv) { e.makeSessionDir(t, "down"); e.live = false }, "down",
+			[]string{"`sc keyholder-stop repo/down`", "`sc resume repo/down`"},
+		},
+		{
+			"no recorded fingerprint", func(t *testing.T, e *sessionKeyEnv) { e.makeSessionDir(t, "a"); e.pair.Fingerprint = "" }, "a",
+			[]string{"`sc keyholder-stop repo/a`", "`sc resume repo/a`"},
+		},
+		{
+			"changed key", func(t *testing.T, e *sessionKeyEnv) { e.makeSessionDir(t, "a"); e.pair.Fingerprint = "SHA256:RECORDED" }, "a",
+			[]string{"`sc keyholder-stop repo/a`", "`sc resume repo/a`"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
