@@ -3400,10 +3400,12 @@ debug-review-package name base *context:
 # start order): spinclass's real `spinclass serve` listener and clown's real shim
 # (`clown bridge-listen`, from a PRE-BUILT clown named by the clown_bin argument) in a real transient unit
 # under clown-agent.slice, both start orders: A serves first, then the unit; B
-# starts the unit first, then serve. The launcher's writes (bridge.cgroup, the
-# unit record, the principal mapping) are made by this recipe in the documented
-# format, NOT by clown's own writer functions (bridgewire.WriteCgroupFile and
-# unitresult.WriteResult need a Go import the committed lock does not carry yet).
+# starts the unit first, then serve; C sends a mismatched hello from inside the
+# admitted unit. bridge.cgroup and the unit record are written by clown's REAL
+# writers (bridgewire.WriteCgroupFile, agentscope.WriteResult) through clown's
+# hidden `clown bridge-seam-write` verb; the principal mapping line is written
+# by this recipe (spinclass has no CLI for its confined-launch writer, pinned to
+# the real writer by TestRecipeMappingLineIsWhatTheRealWriterWrites).
 # Scratch under a 0700 mktemp; nothing of the operator's is touched; one run at a
 # time (host-load per-cpu < 1.0).
 #
@@ -3429,12 +3431,12 @@ debug-bridge-halves-proof clown_bin:
     [ -x "$clown" ] || { say "no executable clown at $clown"; exit 1; }
     say "spinclass=$sc"; say "clown=$clown"
     base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/bh.XXXXXX")"; chmod 0700 "$base"
-    ua="clown-agent-bh$$a.service"; ub="clown-agent-bh$$b.service"
+    ua="clown-agent-bh$$a.service"; ub="clown-agent-bh$$b.service"; uc="clown-agent-bh$$c.service"
     serve_pids=()
     cleanup() {
-      for u in "$ua" "$ub"; do systemctl --user stop "$u" >/dev/null 2>&1 || true; done
+      for u in "$ua" "$ub" "$uc"; do systemctl --user stop "$u" >/dev/null 2>&1 || true; done
       for p in "${serve_pids[@]}"; do kill "$p" >/dev/null 2>&1 || true; done
-      exec 8>&- 9>&- 2>/dev/null || true
+      exec 7>&- 8>&- 9>&- 2>/dev/null || true
       sleep 0.3
       rm -rf "$base"
     }
@@ -3467,7 +3469,7 @@ debug-bridge-halves-proof clown_bin:
     start_serve() { # label fd unit
       bd="$base/b$1"; cgf="$base/cg$1"; mkdir -m 0700 "$bd"
       mkfifo "$base/in$1"
-      if [ "$2" = 9 ]; then exec 9<>"$base/in$1"; else exec 8<>"$base/in$1"; fi
+      case "$2" in 9) exec 9<>"$base/in$1";; 7) exec 7<>"$base/in$1";; *) exec 8<>"$base/in$1";; esac
       ( cd "$wt" && exec env SPINCLASS_SESSION_ID="$key" CLOWN_SESSION_ID="$principal" CLOWN_BRIDGE_DIR="$bd" CLOWN_BRIDGE_UNIT="$3" CLOWN_BRIDGE_CGROUP_FILE="$cgf" "$sc" serve <"$base/in$1" >"$base/serve$1.out" 2>"$base/serve$1.err" ) &
       serve_pids+=("$!")
     }
@@ -3480,12 +3482,20 @@ debug-bridge-halves-proof clown_bin:
     write_cg() { # label unit: the launcher's write once the unit is active
       local cg; cg="$(systemctl --user show -p ControlGroup --value "$2")"
       case "$cg" in */clown-agent.slice/"$2") ;; *) fail "unit cgroup $cg does not end in /clown-agent.slice/$2"; return 1;; esac
-      printf '%s' "$cg" >"$base/cg$1.tmp"; chmod 0600 "$base/cg$1.tmp"; mv "$base/cg$1.tmp" "$base/cg$1"
+      # clown's REAL writer (bridgewire.WriteCgroupFile) through its hidden verb.
+      "$clown" bridge-seam-write cgroup-file --path "$base/cg$1" --cgroup "$cg" >"$base/wcg$1.out" 2>&1 \
+        || { fail "bridge-seam-write cgroup-file failed: $(head -c 200 "$base/wcg$1.out")"; return 1; }
       cgval="$cg"
     }
     write_record_and_mapping() { # unit
-      mkdir -p "$(dirname "$rec")" "$(dirname "$map")"
-      printf '{\n  "version": 1,\n  "capabilities": ["bridge-v1"],\n  "unit": "%s",\n  "principal": "%s",\n  "cgroup": "%s",\n  "uid": %s,\n  "bridge": "recorded"\n}\n' "$1" "$principal" "$cgval" "$(id -u)" >"$rec"
+      mkdir -p "$(dirname "$map")"
+      # The unit record is clown's REAL writer (agentscope.WriteResult over unitresult.WriteResult),
+      # through its hidden verb, written after the shim is ready as in a launch.
+      "$clown" bridge-seam-write result --path "$rec" --unit "$1" --cgroup "$cgval" --principal "$principal" --bridge recorded >"$base/wres.out" 2>&1 \
+        || { fail "bridge-seam-write result failed: $(head -c 200 "$base/wres.out")"; return 1; }
+      # The principal mapping: spinclass has no CLI that runs its confined-launch writer
+      # (RecordPrincipalFromUnit runs inside `sc spawn`), so the recipe writes this one line;
+      # TestRecipeMappingLineIsWhatTheRealWriterWrites pins it to that writer's output.
       printf '{"version":1,"principal":"%s","session_key":"%s","worktree":"%s","unit":"%s"}\n' "$principal" "$key" "$wt" "$1" >"$map"
       # claude's SessionStart hook, run for real (it stamps the principal into the session record).
       ( cd "$wt" && printf '{"hook_event_name":"SessionStart","session_id":"halves","source":"startup","cwd":"%s"}' "$wt" | env CLOWN_SESSION_ID="$principal" "$sc" hook >"$base/hook.out" 2>&1 ) || say "SessionStart hook exited nonzero: $(head -c 200 "$base/hook.out")"
@@ -3534,6 +3544,24 @@ debug-bridge-halves-proof clown_bin:
     systemctl --user stop "$ub" >/dev/null 2>&1 || true
     kill "${serve_pids[1]}" >/dev/null 2>&1 || true
     exec 8>&-
+    sleep 0.5
+
+    say "=== ORDER C: a mismatched hello from a client INSIDE the admitted unit ==="
+    start_serve c 7 "$uc"
+    waitfor 10 sock_up "$base/bc/bridge.sock" && pass "C: serve bound bridge.sock" || fail "C: serve never bound bridge.sock"
+    socat_bin="$(command -v socat)"
+    systemd-run --user --quiet --collect --slice=clown-agent.slice --unit="${uc%.service}" \
+      sh -c "sleep 4; printf 'BRIDGE/9 session\n' | $socat_bin -t2 - UNIX-CONNECT:$base/bc/bridge.sock >$base/verc.out 2>&1" >/dev/null 2>&1 \
+      && say "unit $uc started (a client that sends BRIDGE/9, inside the unit's cgroup)" || fail "C: systemd-run failed"
+    waitfor 10 systemctl --user is-active --quiet "$uc"
+    write_cg c "$uc" && say "cgroup file written: $cgval"
+    waitfor 15 test -s "$base/verc.out"
+    r="$(cat "$base/verc.out" 2>/dev/null)"
+    case "$r" in "ERR version"*) pass "C: a mismatched hello from inside the admitted unit gets: $(printf %s "$r" | head -1 | cut -c1-120)";; *) fail "C: the mismatched hello got: '$r'";; esac
+    say "C: the shim's own unusable-message text was NOT exercised (the shim sends a correct hello; the real serve cannot be made to answer a mismatch to it without changing it)"
+    systemctl --user stop "$uc" >/dev/null 2>&1 || true
+    kill "${serve_pids[2]}" >/dev/null 2>&1 || true
+    exec 7>&-
     sleep 0.5
 
     left_units="$(systemctl --user list-units --all --no-legend 'clown-agent-bh*' 2>/dev/null | grep -c "bh$$")"
