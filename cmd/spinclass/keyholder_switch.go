@@ -98,11 +98,14 @@ func applyPasswdHomeLayers(sw *keyholderSwitch, home, repoPath string) error {
 	if filepath.Clean(pw) == filepath.Clean(home) {
 		return nil
 	}
-	ph, err := sweatfileio.LoadHierarchy(pw, repoPath)
+	ph, err := sweatfileio.LoadTrustedHierarchy(pw, repoPath)
 	if err != nil {
-		// LoadHierarchy fails only for a layer that EXISTS and cannot be read or
-		// parsed (an absent layer is skipped): that file may be the one that switches
-		// the key holder on, so it refuses, with no state needed as evidence.
+		// LoadTrustedHierarchy fails only for a TRUSTED layer (the global file or a
+		// directory above the repo) that EXISTS and cannot be read or parsed (an
+		// absent layer is skipped; the repo's own file is never read here, it could
+		// never have said "on" and the target's was already read by the launch): that
+		// file may be the one that switches the key holder on, so it refuses, with no
+		// state needed as evidence.
 		return fmt.Errorf("reading the sweatfiles under the account's home for [keyholder]: %w (a sweatfile that exists but cannot be loaded may be the layer that switches the key holder on: sessions are not launched until it is fixed or removed)", err)
 	}
 	on, _, err := sweatfileio.TrustedKeyholderMode(ph, pw, repoPath)
@@ -138,11 +141,15 @@ func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
 	if driver == "" || driver == repoPath {
 		return sw, nil
 	}
-	dh, err := sweatfileio.LoadHierarchy(home, driver)
+	dh, err := sweatfileio.LoadTrustedHierarchy(home, driver)
 	if err != nil {
-		// An existing layer that cannot be loaded may be the one that switches the key
-		// holder on: it refuses, with no state needed as evidence (an absent layer is
-		// skipped by LoadHierarchy and is "never on").
+		// An existing TRUSTED layer that cannot be loaded may be the one that switches
+		// the key holder on: it refuses, with no state needed as evidence (an absent
+		// layer is skipped and is "never on"). The driver repo's OWN main-checkout
+		// sweatfile, and ~/sweatfile when the working directory is in no repo (the
+		// driver is then home and that file is its "repo" layer), are untrusted: they
+		// could never have said "on", so they are not read here and their failure
+		// refuses nothing (F1 of the follow-up review).
 		return sw, fmt.Errorf("reading the driver's sweatfiles for [keyholder] (%s): %w (a sweatfile that exists but cannot be loaded may be the layer that switches the key holder on: sessions are not launched until it is fixed or removed)", driver, err)
 	}
 	dOn, _, err := sweatfileio.TrustedKeyholderMode(dh, home, driver)

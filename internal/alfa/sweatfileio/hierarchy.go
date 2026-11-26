@@ -49,6 +49,15 @@ func LoadHierarchy(home, repoDir string) (sweatfile.Hierarchy, error) {
 	return loadHierarchy(home, repoDir, true)
 }
 
+// LoadTrustedHierarchy is LoadHierarchy without step 4: the global file and the
+// directories ABOVE the repo, never the repo's own (untrusted) sweatfile. It is
+// for a caller that reads only what a trusted layer could say (the key holder
+// switch in the driver's context and the account's home), so a repo-level file
+// that could never have said "on" cannot fail the load.
+func LoadTrustedHierarchy(home, repoDir string) (sweatfile.Hierarchy, error) {
+	return loadHierarchy(home, repoDir, false)
+}
+
 // loadHierarchy is LoadHierarchy; withRepo false stops before step 4, leaving
 // the repo layer to a caller that supplies it from a committed blob.
 func loadHierarchy(home, repoDir string, withRepo bool) (sweatfile.Hierarchy, error) {
