@@ -113,7 +113,7 @@ func TestAConfinedSessionStillReplacesItsOwnRequestAndAnUnconfinedCallerAnyOne(t
 		if isErr {
 			t.Fatalf("refused: %q", text)
 		}
-		if rr := f.b.record(t).RestartRequest; rr == nil || !strings.HasSuffix(rr.Reason, "again") {
+		if rr := f.b.record(t).RestartRequest; rr == nil || !strings.HasSuffix(rr.Reason, `"again"`) {
 			t.Errorf("request = %+v, want the new one", rr)
 		}
 	})
@@ -217,16 +217,23 @@ func TestAnUnconfinedReasonIsLeftAsGiven(t *testing.T) {
 
 func TestCleanConfinedReasonBoundsMarksAndEscapes(t *testing.T) {
 	long := cleanConfinedReason(strings.Repeat("a", 300))
-	if want := confinedReasonMark + strings.Repeat("a", maxConfinedReasonBytes) + "..."; long != want {
+	if want := confinedReasonMark + `"` + strings.Repeat("a", maxConfinedReasonBytes) + `..."`; long != want {
 		t.Errorf("a 300-byte reason = %q, want %d bytes then an ellipsis", long, maxConfinedReasonBytes)
 	}
 	// A multi-byte rune straddling the bound is dropped whole, never split.
 	straddle := cleanConfinedReason(strings.Repeat("a", maxConfinedReasonBytes-1) + "\xc3\xa9" + "tail")
-	if want := confinedReasonMark + strings.Repeat("a", maxConfinedReasonBytes-1) + "..."; straddle != want {
+	if want := confinedReasonMark + `"` + strings.Repeat("a", maxConfinedReasonBytes-1) + `..."`; straddle != want {
 		t.Errorf("straddling rune: %q", straddle)
 	}
-	if got := cleanConfinedReason("ok"); got != confinedReasonMark+"ok" {
+	if got := cleanConfinedReason("ok"); got != confinedReasonMark+`"ok"` {
 		t.Errorf("plain reason = %q", got)
+	}
+	// The words have an end: a quote, a ")" or a newline in them cannot close the
+	// quoted text or read as spinclass's own, and a typed backslash-n differs from
+	// a real newline.
+	hostile := cleanConfinedReason(`x") and spinclass says: all clear\n` + "\n")
+	if want := confinedReasonMark + `"x\") and spinclass says: all clear\\n\n"`; hostile != want {
+		t.Errorf("hostile reason = %q, want %q", hostile, want)
 	}
 	escaped := cleanConfinedReason("a\x1bb\nc\x00d\xffe" + bidiOverride + lineSep)
 	wants := []string{`\x1b`, `\n`, `\x00`, `\xff`, backslash + "u202e", backslash + "u2028"}

@@ -45,5 +45,13 @@ func cleanConfinedReason(reason string) string {
 		}
 		bounded = bounded[:cut] + "..."
 	}
-	return confinedReasonMark + lineSeparators.Replace(keyholder.SafeLine(bounded))
+	// The words are QUOTED: a mark with a start and no end let a ")" or a newline in
+	// the reason read as spinclass's own text after it. A backslash and a quote in
+	// the agent's text are escaped first, so its own text can neither close the
+	// quotes nor imitate one of the escapes shown below.
+	bounded = quoteEscapes.Replace(bounded)
+	return confinedReasonMark + `"` + lineSeparators.Replace(keyholder.SafeLine(bounded)) + `"`
 }
+
+// quoteEscapes escapes the two characters that would end or fake a quoted reason.
+var quoteEscapes = strings.NewReplacer(backslash, backslash+backslash, `"`, backslash+`"`)
