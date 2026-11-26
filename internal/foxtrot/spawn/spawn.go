@@ -21,6 +21,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/apply"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	"code.linenisgreat.com/spinclass/internal/echo/shop"
 )
 
@@ -49,6 +50,7 @@ type Result struct {
 	MultiplexerID string // the worker's session key (= SPINCLASS_SESSION_ID, #146)
 	PoshSessionID string // the worker's posh/clown session id from the hello (reattach target); empty if the worker reported none
 	OwnKeyHolder  bool   // the worker was launched on its own key holder, not the launcher's agent
+	PushLine      string // the worker's push token line (auth.PushStatus.Line)
 }
 
 // Pending is a spawned worker whose worktree exists and whose detached entry
@@ -62,6 +64,7 @@ type Pending struct {
 	RepoPath     string // the worker repo's main checkout (for a timeout reap)
 	Branch       string // the worker's branch (for a timeout reap)
 	OwnKeyHolder bool   // the worker was launched on its own key holder
+	PushLine     string // the worker's push token line (auth.PushStatus.Line)
 
 	rp         worktree.ResolvedPath
 	driver     Driver
@@ -239,9 +242,11 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	// tolerable. There is deliberately no spawn-session parameter for it: a
 	// driver agent must not be able to wave away its worker's stale toolchain,
 	// so only the repo's owner can opt out (spinclass#250).
+	var push auth.PushStatus
 	existed, err := shop.Create(io.Discard, rp, shop.CreateOpts{
 		AllowStaleBase:    merged.AllowStaleBase(),
 		AllowNoCredential: merged.AllowNoCredential(),
+		Push:              &push,
 	}, nil)
 	if err != nil {
 		undoOnFailure()
@@ -326,6 +331,7 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 		return refuse(err)
 	}
 	p.OwnKeyHolder = kh != nil
+	p.PushLine = push.Line(p.OwnKeyHolder, rp.SessionKey)
 	return p, nil
 }
 
@@ -780,6 +786,7 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 		MultiplexerID: p.rp.SessionKey,
 		PoshSessionID: poshID,
 		OwnKeyHolder:  p.OwnKeyHolder,
+		PushLine:      p.PushLine,
 	}, nil
 }
 

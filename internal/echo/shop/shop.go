@@ -17,6 +17,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/0/tty"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
@@ -90,6 +91,9 @@ type CreateOpts struct {
 	// as before FDR 0028) instead of a fatal refusal. Same two-halves shape as
 	// AllowStaleBase: `--allow-no-credential` OR [hooks].allow-no-credential.
 	AllowNoCredential bool
+	// Push, when set, receives the session's push token status: what this
+	// creation minted, or what an existing session already has.
+	Push *auth.PushStatus
 }
 
 func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap.Writer) (bool, error) {
@@ -137,10 +141,12 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 		// base-branch gate so spawn/run sessions get one too. See
 		// ProvisionCredential for the ordering and failure semantics.
 		if err := ProvisionCredential(
-			context.Background(), tw, result, worktreePath, opts.AllowNoCredential,
+			context.Background(), tw, result, worktreePath, opts.AllowNoCredential, opts.Push,
 		); err != nil {
 			return false, fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential (pushes then use the inherited ssh-agent)", err)
 		}
+	} else if opts.Push != nil {
+		*opts.Push = auth.RecordedStatus(worktreePath.RepoPath, worktreePath.Branch, worktreePath.AbsPath)
 	}
 
 	return existed, nil
@@ -172,6 +178,7 @@ func ProvisionCredential(
 	h sweatfile.Hierarchy,
 	worktreePath worktree.ResolvedPath,
 	allowNoCredential bool,
+	push *auth.PushStatus,
 ) error {
 	if n, errs := auth.SweepOrphans(ctx, worktreePath.RepoPath, os.Stderr); n > 0 || len(errs) > 0 {
 		reportCredentialSweep(tw, n, errs)
@@ -222,6 +229,13 @@ func ProvisionCredential(
 			}
 		}
 		outcome, mintErr = auth.Mint(ctx, sweatfile.Sweatfile{Auth: &trusted}, id, resolver)
+	}
+	if push != nil {
+		*push = auth.StatusFromMint(outcome, mintErr)
+		if push.Kind == auth.NoForgeOrigin {
+			// The parse error quotes the remote URL, which may carry userinfo.
+			push.Reason = "the origin is not a forge URL, or there is none"
+		}
 	}
 	switch {
 	case mintErr != nil && !allowNoCredential:
@@ -334,6 +348,19 @@ func logSweatfileResult(result sweatfile.Hierarchy) {
 	)
 }
 
+// ownsKeyHolder says whether the entrypoint is launched on a key holder of its
+// own: the environment a start or resume hands it carries the holder's
+// certificate path only then. A pair record on disk would not do: it outlives a
+// resume with the switch off.
+func ownsKeyHolder(exec executor.Executor) bool {
+	sexec, ok := exec.(executor.SessionExecutor)
+	return ok && sexec.Env[keyholder.CertEnv] != ""
+}
+
+// PushLineWriter is where Attach prints the push token line. A variable so a
+// test can read it.
+var PushLineWriter = func() io.Writer { return os.Stderr }
+
 // PinEntry resolves the [session-entry] start, resume and env, and the
 // on-attach and on-detach hooks, of sf (the merged global, ancestor and
 // main-checkout layers) into the record stored on a new session's state, so a
@@ -405,15 +432,20 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 	allowStale := allowStaleBase || sf.AllowStaleBase()
 	allowNoCred := allowNoCredential || sf.AllowNoCredential()
 
+	var push auth.PushStatus
 	existed, err := Create(w, rp, CreateOpts{
 		Verbose:           verbose,
 		Format:            format,
 		AllowStaleBase:    allowStale,
 		AllowNoCredential: allowNoCred,
+		Push:              &push,
 	}, tw)
 	if err != nil {
 		return err
 	}
+	// A start or a resume says whether the session can push with a token, before
+	// the entrypoint takes the terminal. On stderr: stdout stays as it was.
+	fmt.Fprintln(PushLineWriter(), "spinclass: "+push.Line(ownsKeyHolder(exec), rp.SessionKey))
 
 	// Resuming an existing worktree still keeps the repo's default branch
 	// current — this replaces the old pull step, which pulled whatever branch

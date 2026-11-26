@@ -84,6 +84,14 @@ func TestASpawnReportsWhetherTheWorkerHasItsOwnKeyHolder(t *testing.T) {
 			if p.OwnKeyHolder != (kh != nil) {
 				t.Errorf("OwnKeyHolder = %v", p.OwnKeyHolder)
 			}
+			// And it says the truth about pushing for a worker with no token.
+			want := "pushes use the ssh agent this session was given"
+			if kh != nil {
+				want = "this worker cannot push: [auth] mint-command is not set"
+			}
+			if !strings.HasPrefix(p.PushLine, "push_token: no") || !strings.Contains(p.PushLine, want) {
+				t.Errorf("PushLine = %q, want it to say %q", p.PushLine, want)
+			}
 		})
 	}
 }

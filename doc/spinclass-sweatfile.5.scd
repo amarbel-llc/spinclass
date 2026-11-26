@@ -1000,6 +1000,22 @@ sweatfile is whatever lands on the default branch, so a repo-level *[auth]*
 ignored, with a SKIP point at session creation and an *sc validate* warning.
 A host's grant flags can therefore not be overridden by a repo.
 
+*What a session is told.* Every spawn (*sc spawn* and *spawn-session*), *sc
+start* and *sc resume* print one *push_token:* line (a spawn in its result,
+start and resume on stderr). With a token it says where it came from
+(*minted by [auth].mint-command*, or *pool slot* and the slot's name), *reused* with the
+time for a token the session already had, and when it expires if spinclass was
+told (a pool slot's deadline; otherwise *expiry unknown*: spinclass never reads
+the token). Without one it says why. A session with no key holder then pushes
+with the ssh agent it was given. A session on its own key holder has only a key
+no forge knows, so it cannot push over ssh, and the line says what to do; an
+origin that needs no ssh key (a local path, or an https remote your own git
+config has a credential helper for) is not affected. A token is only made when
+a session is created. The session record, and its tombstone after a close, keep
+*credential.source* (*mint-command* or *pool*), *pool\_slot* and *expires\_at*:
+names and times, never the token. A failed mint or revoke run while the ssh
+agent is a key holder's says so: a holder has no card.
+
 *mint-command*
 	Prints the token on stdout. Spinclass stores it as a mode-600
 	git-credential-store file in its state directory,

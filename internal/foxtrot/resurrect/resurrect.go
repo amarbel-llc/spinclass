@@ -82,7 +82,7 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 	// Before session.Write: a refusal has already torn the worktree and branch
 	// down, so the tombstone is untouched and the resurrect can be retried.
 	// No CLI/MCP flag; only the sweatfile knob applies, as for `sc spawn`.
-	if err := shop.ProvisionCredential(context.Background(), tw, h, rp, h.Merged.AllowNoCredential()); err != nil {
+	if err := shop.ProvisionCredential(context.Background(), tw, h, rp, h.Merged.AllowNoCredential(), nil); err != nil {
 		return fmt.Errorf("%w\n\nset [hooks].allow-no-credential to resurrect without a push credential", err)
 	}
 

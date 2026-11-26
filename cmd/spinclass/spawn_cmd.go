@@ -173,7 +173,15 @@ func spawnResultText(driverPrincipal string, res spawn.Result) string {
 	return fmt.Sprintf(
 		"session_key: %s\nworktree_path: %s\nmultiplexer_id: %s\nworker will message %s via chat",
 		res.SessionKey, res.WorktreePath, res.MultiplexerID, driverPrincipal,
-	) + keyHolderSpawnLine(res.OwnKeyHolder, res.SessionKey)
+	) + keyHolderSpawnLine(res.OwnKeyHolder, res.SessionKey) + pushSpawnLine(res.PushLine)
+}
+
+// pushSpawnLine appends the worker's push token line, when there is one.
+func pushSpawnLine(line string) string {
+	if line == "" {
+		return ""
+	}
+	return "\n" + line
 }
 
 // keyHolderSpawnLine is the one extra line a spawn prints for a worker with its

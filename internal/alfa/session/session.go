@@ -58,6 +58,13 @@ type Credential struct {
 	// into its own worktree's sweatfile. nil marks a record minted before the pin
 	// (legacy); a pointer to "" records that no revoke-command was configured.
 	RevokeCommand *string `json:"revoke_command,omitempty"`
+	// Source says where the token came from: "mint-command" or "pool", empty on
+	// a record made before it was kept. PoolSlot names the claimed pool slot and
+	// ExpiresAt is its deadline, when spinclass was told one. Names and times
+	// only, never the token.
+	Source    string     `json:"source,omitempty"`
+	PoolSlot  string     `json:"pool_slot,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // CredentialRemote records what a mint saw and wrote about the forge remote.

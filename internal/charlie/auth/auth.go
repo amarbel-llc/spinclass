@@ -373,6 +373,12 @@ type MintOutcome struct {
 	Minted   bool
 	Skipped  string
 	Resolved string
+	// Kind says why a skip happened; Source, PoolSlot and ExpiresAt say where
+	// a minted token came from and when it expires, if spinclass was told.
+	Kind      NoTokenKind
+	Source    string
+	PoolSlot  string
+	ExpiresAt *time.Time
 }
 
 // Mint runs [auth].mint-command (and pins [auth].revoke-command on the session
@@ -411,10 +417,10 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	// must not stop a remote-less scratch repo from getting a session.
 	originURL, origin, err := readOrigin(id.RepoPath)
 	if err != nil {
-		return MintOutcome{Skipped: "no forge origin remote: " + strings.TrimSpace(err.Error())}, nil
+		return MintOutcome{Kind: NoForgeOrigin, Skipped: "no forge origin remote: " + strings.TrimSpace(err.Error())}, nil
 	}
 	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, origin.Host) {
-		return MintOutcome{Skipped: fmt.Sprintf("origin host %s not in [auth].forge-hosts", origin.Host)}, nil
+		return MintOutcome{Kind: HostNotListed, Skipped: fmt.Sprintf("origin host %s not in [auth].forge-hosts", origin.Host)}, nil
 	}
 	res, err := Resolve(ctx, urlResolver, id, originURL, origin)
 	if err != nil {
@@ -445,7 +451,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	case claim != nil:
 		token = claim.token
 	case !hasCmd:
-		return MintOutcome{Skipped: fmt.Sprintf("token pool has no unclaimed, unexpired slot for %s", res.Forge.OwnerRepo)}, nil
+		return MintOutcome{Kind: PoolEmpty, Skipped: fmt.Sprintf("token pool has no unclaimed, unexpired slot for %s", res.Forge.OwnerRepo)}, nil
 	default:
 		// The mint usually signs with the operator's card through the ssh-agent,
 		// which can be briefly unreachable (a forwarded agent on a lossy link): ride
@@ -457,7 +463,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 			return out, runErr
 		})
 		if err != nil {
-			return MintOutcome{}, fmt.Errorf("[auth] mint-command failed: %w", err)
+			return MintOutcome{}, fmt.Errorf("[auth] mint-command failed%s: %w", holderAgentHint(), err)
 		}
 		token = strings.TrimSpace(out)
 		if token == "" {
@@ -500,6 +506,10 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 		MintedAt:      time.Now().UTC(),
 		Remote:        res.record(),
 		RevokeCommand: &pinned,
+		Source:        SourceMint,
+	}
+	if claim != nil {
+		cred.Source, cred.PoolSlot, cred.ExpiresAt = SourcePool, claim.slot.Session, claim.slot.Deadline
 	}
 	// A locked update (#348) so a concurrent writer of another field survives;
 	// a session with nothing persisted yet (EnsureWorktreeState synthesized st)
@@ -516,7 +526,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
 	wired = true
-	outcome := MintOutcome{Minted: true}
+	outcome := MintOutcome{Minted: true, Source: cred.Source, PoolSlot: cred.PoolSlot, ExpiresAt: cred.ExpiresAt}
 	if res.Resolved {
 		outcome.Resolved = res.Rewrite.HTTPS
 	}
@@ -728,7 +738,7 @@ func revoke(ctx context.Context, id Identity, st *session.State, cmd, dir string
 		_, _ = io.WriteString(w, out)
 	}
 	if err != nil {
-		return fmt.Errorf("[auth] revoke-command failed: %w", err)
+		return fmt.Errorf("[auth] revoke-command failed%s: %w", holderAgentHint(), err)
 	}
 	now := time.Now().UTC()
 	if st.Credential != nil {

@@ -8,6 +8,19 @@ import (
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
+// The push token line follows the rest, on both spawn surfaces.
+func TestSpawnOutputEndsWithThePushTokenLine(t *testing.T) {
+	const line = "push_token: yes (minted by [auth].mint-command; expiry unknown)"
+	res := spawn.Result{SessionKey: "repo/w", WorktreePath: "/wt", MultiplexerID: "repo/w", OwnKeyHolder: true, PushLine: line}
+	if got := spawnResultText("driver", res); !strings.HasSuffix(got, "sc session-key repo/w)\n"+line) {
+		t.Errorf("sync: %s", got)
+	}
+	pending := spawn.Pending{SessionKey: "repo/w", WorktreePath: "/wt", PushLine: line}
+	if got := asyncSpawnResultText(pending, "driver", "job", time.Minute); !strings.HasSuffix(got, "\n"+line) {
+		t.Errorf("async: %s", got)
+	}
+}
+
 // With its own holder a spawn adds exactly one line; without one the output is
 // unchanged, so a script reading it sees no difference.
 func TestSpawnOutputSaysTheKeyHolderOnlyWhenTheWorkerHasOne(t *testing.T) {

@@ -243,7 +243,7 @@ func TestCreatePinsTheRevokeCommandAndIgnoresTheWorktreeLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ProvisionCredential(context.Background(), nil, h, a.rp, false); err != nil {
+	if err := ProvisionCredential(context.Background(), nil, h, a.rp, false, nil); err != nil {
 		t.Fatalf("ProvisionCredential: %v", err)
 	}
 	if _, err := os.Stat(worktreeMarker); err == nil {
@@ -276,8 +276,12 @@ func TestProvisionCredentialWarnsOnForgeHostsSkipWithoutWriter(t *testing.T) {
 	log.SetOutput(&logged)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
-	if err := ProvisionCredential(context.Background(), nil, h, a.rp, false); err != nil {
+	var push auth.PushStatus
+	if err := ProvisionCredential(context.Background(), nil, h, a.rp, false, &push); err != nil {
 		t.Fatalf("ProvisionCredential: %v", err)
+	}
+	if push.Token || push.Kind != auth.HostNotListed || !strings.Contains(push.Reason, "not in [auth].forge-hosts") {
+		t.Errorf("push status of a skipped host = %+v", push)
 	}
 	for _, want := range []string{"credential mint skipped", "not in [auth].forge-hosts"} {
 		if !strings.Contains(logged.String(), want) {
