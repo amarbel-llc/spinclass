@@ -28,6 +28,20 @@ type keyholderSwitch struct {
 	// lives. They are zero on a host that never used the file.
 	File     sweatfileio.KeyholderSwitchValue
 	FilePath string
+	// ToolConflict is the target/driver disagreement on a program path, kept even
+	// while the switch is off: the switch can still turn on LATER (the passwd
+	// home's layers, the switch file), and a path chosen by the caller's directory
+	// may not swap the program the pair runs on any route to on (M-1 of the
+	// switch review). It is returned wherever On becomes true.
+	ToolConflict error
+}
+
+// refuseToolConflict is the one check every route to On runs once On is true.
+func (s keyholderSwitch) refuseToolConflict() error {
+	if s.On && s.ToolConflict != nil {
+		return s.ToolConflict
+	}
+	return nil
 }
 
 // Source says where the effective mode came from: the switch file when it said
@@ -88,7 +102,7 @@ func applyKeyholderSwitchFile(sw *keyholderSwitch) error {
 		}
 		sw.On = true
 	}
-	return nil
+	return sw.refuseToolConflict()
 }
 
 // resolveKeyholderLayersAndPasswd reads the switch the way the two sibling switches are
@@ -186,7 +200,7 @@ func applyPasswdHomeLayers(sw *keyholderSwitch, home, repoPath string) error {
 	if piggy != "" {
 		sw.Piggy = piggy
 	}
-	return nil
+	return sw.refuseToolConflict()
 }
 
 func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
@@ -232,8 +246,12 @@ func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
 	}{{"fibby", tFibby, dFibby, &sw.Fibby}, {"piggy", tPiggy, dPiggy, &sw.Piggy}} {
 		switch {
 		case p.target != "" && p.driver != "" && p.target != p.driver:
+			conflict := fmt.Errorf("[keyholder] %s is %q for the target repo and %q for the driver's context (%s): the program the pair runs may not depend on which directory the caller chose; make the host's configuration write one value in a layer both see", p.name, p.target, p.driver, driver)
+			if sw.ToolConflict == nil {
+				sw.ToolConflict = conflict
+			}
 			if sw.On {
-				return sw, fmt.Errorf("[keyholder] %s is %q for the target repo and %q for the driver's context (%s): the program the pair runs may not depend on which directory the caller chose; make the host's configuration write one value in a layer both see", p.name, p.target, p.driver, driver)
+				return sw, conflict
 			}
 		case p.target == "":
 			*p.resolved = p.driver
