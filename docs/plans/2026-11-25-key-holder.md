@@ -397,6 +397,25 @@ These are limits of this build, said plainly; none is a pretend fix.
   build keeps rule A; implicit sessions get holders on Sunday). See "Not given a
   holder in this build" above and "Later".
 
+## A host that never switched it on launches as before (round 3, A-M1 / B-M2)
+
+The key holder added places a launch can fail that did not exist before it: the
+account database's home lookup, the sweatfiles read under that home, the
+driver's own context, and the home and state directories the relaunch paths
+resolve. A host with no `[keyholder]` table must launch exactly as it did, so
+(`cmd/spinclass/keyholder_newsource.go`, one function for every site):
+
+- A failure of one of those NEW sources refuses the launch only when there is
+  evidence the switch is, or once was, on for this host: a layer that did load
+  says `on`, or the key holder has left state under its state root (a pair
+  directory, a key history, a kind record or a lock file; an unreadable state
+  root counts as evidence, since not knowing is not "no"). Otherwise it is
+  warned once per process on stderr and the launch proceeds with the switch off.
+- Still refused with no evidence at all: the TARGET repo's own sweatfile
+  hierarchy not loading (every launch read it before the key holder existed:
+  `attachSession` and the spawn path), and a `[keyholder]` table that does not
+  parse or validate (a layer that names the key holder is evidence in itself).
+
 ## Deploy order, and what breaks if it is violated (B-M5, B-M4)
 
 A host takes the key holder in this order. Each step names what breaks when it is

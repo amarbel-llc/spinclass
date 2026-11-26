@@ -1502,6 +1502,17 @@ that can write the operator's home.
 	session finds it at *$SPINCLASS_KEYHOLDER_CERT*. Any other value is an error:
 	every launch is refused until it is fixed (*sc validate* names it).
 
+	*A host that never switched it on.* Where no layer names *[keyholder]* and
+	the key holder has left nothing under its state directory, a launch behaves as
+	it did before the key holder existed. A failure to resolve the account's home,
+	to read the sweatfiles under it or the driver's own, or to find the home or
+	state directory a relaunch needs, is then a single warning line on standard
+	error and the launch goes ahead with the switch off. The same failure refuses
+	the launch as soon as a layer that did load says *on*, or any key holder state
+	exists (a pair, a key history, a kind record or a lock file). A *[keyholder]*
+	table that does not validate, and the target repository's own sweatfiles not
+	loading, always refuse.
+
 	*Deploy order.* A host takes the key holder in this order, and each step fails
 	closed when skipped: (1) a spinclass that parses *[keyholder]* (without it,
 	*sc validate* rejects the table); (2) clown f502df21 or later (an older clown
