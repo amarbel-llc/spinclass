@@ -2361,9 +2361,10 @@ debug-keyholder-hogtie-proof fibby="" piggy="" circus="/nix/store/srisylv7g0sms1
       if [ "$rc" != 0 ]; then pass "d negative: the tool wrapped the expired certificate and verify REFUSES it: rc=$rc ${vout:0:100}"; else fail "d negative: the expired certificate VERIFIED"; fi
     fi
     # e: ssh-keygen writes msg.sig; keep holder 1's, then sign with holder 2 and keep that one apart.
-    cp msg.sig msg1.sig
+    cp msg.sig msg1.sig; rm -f msg.sig
     SSH_AUTH_SOCK="$sock2" ssh-keygen -Y sign -U -f holder2.pub -n hogtie-v1 msg >sign2.out 2>&1 || { say "FAIL: holder 2 could not sign: $(head -c 200 sign2.out)"; fails=$((fails + 1)); }
     mv msg.sig msg2.sig
+    if cmp -s msg1.sig msg2.sig; then say "FAIL: holder 2's signature is byte-identical to holder 1's (setup)"; fails=$((fails + 1)); else say "INFO: holder 2's signature differs from holder 1's (setup check)"; fi
     "$circus" cert rewrap --cert holder1-cert.pub <msg2.sig >msg2.on1.sig 2>e.err; rc=$?
     if [ "$rc" != 0 ]; then pass "e negative: holder 2's signature rewrapped with holder 1's certificate is refused by the tool: rc=$rc $(head -c 160 e.err)"; else fail "e negative: another session's signature was wrapped with holder 1's certificate"; fi
     "$circus" cert rewrap --cert holder2-cert.pub <msg2.sig >msg2.cert.sig 2>/dev/null && say "INFO: holder 2's own rewrapped signature verifies as its own principal: $(ssh-keygen -Y verify -f allowed -I flic:restic-snapshots -n hogtie-v1 -s msg2.cert.sig <msg 2>&1 | head -c 100) (hogtie binds the principal, not the session: the per-session separation is that each key has its own certificate)"
