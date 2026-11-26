@@ -274,12 +274,12 @@ func resolveGritCaller(ctx context.Context, cwd string) store.Session {
 	s := store.Session{Dir: cwd, Confinement: store.ConfinementConfined}
 	principal := os.Getenv("CLOWN_SESSION_ID")
 	stateDir, err := confinement.DefaultStateDir()
-	confined, _ := confinement.ClassifyOrigin(ctx, func() (bool, string) {
-		if err != nil {
-			return true, "state directory unresolved"
-		}
-		return confinement.ClassifyServeCaller(confinement.Host{}, stateDir, principal, os.Getpid())
-	})
+	// The same classifier as the gated tools (R3-M1, serveCallerConfined): it reads
+	// the launch spec spinclass wrote before clown's unit record, so a grit call in
+	// the window between a confined launch and the record is confined, and a
+	// session record that exists and cannot be read refuses. An unresolved state
+	// directory counts as confined.
+	confined, _ := confinement.ClassifyOrigin(ctx, serveCallerConfined)
 	switch {
 	case !confined:
 		s.Confinement = store.ConfinementUnconfined

@@ -29,6 +29,7 @@ func stubGritCallerUnconfined(t *testing.T) {
 }
 
 func TestResolveGritCallerWithoutAPrincipalIsConfined(t *testing.T) {
+	useRealServeClassifier(t)
 	t.Setenv("CLOWN_SESSION_ID", "")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if got := resolveGritCaller(context.Background(), t.TempDir()); got.Confinement != store.ConfinementConfined {
@@ -40,6 +41,7 @@ func TestResolveGritCallerWithoutAPrincipalIsConfined(t *testing.T) {
 // principal says, and works in the worktree of the session its origin names
 // (not the cwd, not the principal's mapping).
 func TestResolveGritCallerForABridgedOriginIsConfinedWhateverThePrincipalSays(t *testing.T) {
+	useRealServeClassifier(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
@@ -68,6 +70,7 @@ func TestResolveGritCallerForABridgedOriginIsConfinedWhateverThePrincipalSays(t 
 }
 
 func TestResolveGritCallerWithAnUnrecordedPrincipalIsUnconfined(t *testing.T) {
+	useRealServeClassifier(t)
 	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	removeRecord, err := registerServeRecord()
@@ -81,6 +84,7 @@ func TestResolveGritCallerWithAnUnrecordedPrincipalIsUnconfined(t *testing.T) {
 }
 
 func TestResolveGritCallerWithoutAServeRecordIsConfined(t *testing.T) {
+	useRealServeClassifier(t)
 	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if got := resolveGritCaller(context.Background(), t.TempDir()); got.Confinement != store.ConfinementConfined {
