@@ -25,6 +25,7 @@ func switchFileIs(t *testing.T, v sweatfileio.KeyholderSwitchValue, present bool
 // the key holder on with them.
 func khStoreOn(t *testing.T, mode string) string {
 	t.Helper()
+	preflightIs(t)
 	store := t.TempDir()
 	prev := sweatfileio.KeyholderStoreRoot
 	sweatfileio.KeyholderStoreRoot = store

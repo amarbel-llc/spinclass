@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
@@ -55,8 +56,38 @@ func TestRunPrintsTheEffectiveKeyHolderMode(t *testing.T) {
 	}
 }
 
-// Both paths valid: mode on is clean.
+// preflightIs aims the shared start preconditions, which a test build (no tool
+// pins) cannot meet, at a canned answer.
+func preflightIs(t *testing.T, problems ...keyholder.Problem) {
+	t.Helper()
+	prev := KeyholderPreflight
+	KeyholderPreflight = func() []keyholder.Problem { return problems }
+	t.Cleanup(func() { KeyholderPreflight = prev })
+}
+
+// What a start would refuse, validate fails on, one point each, with the next
+// command; with the mode off it asks nothing.
+func TestRunFailsOnEveryPreconditionAPairWouldRefuse(t *testing.T) {
+	body := khStoreOn(t, "mode = \"on\"\n")
+	preflightIs(t, keyholder.Problem{Name: "user-manager", What: "your systemd user manager does not answer", Next: "run `loginctl enable-linger \"$USER\"`"})
+	out, code := keyholderRun(t, body)
+	for _, want := range []string{"keyholder.user-manager", "does not answer", "next: run `loginctl enable-linger"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if code == 0 {
+		t.Error("exit 0 with a precondition that does not hold")
+	}
+	out, code = keyholderRun(t, "")
+	if code != 0 || strings.Contains(out, "keyholder.user-manager") || !strings.Contains(out, "to turn it on") {
+		t.Errorf("off: exit %d, want 0, no precondition and how to turn it on:\n%s", code, out)
+	}
+}
+
+// Both paths valid: mode on is clean, and says how to prove it.
 func TestRunAcceptsTheKeyHolderOnWithBothPrograms(t *testing.T) {
+	preflightIs(t)
 	store := t.TempDir()
 	prev := sweatfileio.KeyholderStoreRoot
 	sweatfileio.KeyholderStoreRoot = store
@@ -68,7 +99,7 @@ func TestRunAcceptsTheKeyHolderOnWithBothPrograms(t *testing.T) {
 		}
 	}
 	out, code := keyholderRun(t, "[keyholder]\nmode = \"on\"\nfibby = \""+fibby+"\"\npiggy = \""+piggy+"\"\n")
-	if code != 0 || strings.Contains(out, "not ok") {
+	if code != 0 || strings.Contains(out, "not ok") || !strings.Contains(out, "sc keyholder-selftest") {
 		t.Errorf("mode on with both programs: exit %d:\n%s", code, out)
 	}
 }

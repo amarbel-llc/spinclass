@@ -188,10 +188,8 @@ func (l *Launcher) Start(ctx context.Context, sessionKey string) (Pair, error) {
 
 func (l *Launcher) start(ctx context.Context, sessionKey string) (Pair, error) {
 	ly := l.layoutFor(sessionKey)
-	for _, p := range []string{ly.ctl, ly.pcsc, ly.agent} {
-		if len(p) > MaxSocketPath {
-			return Pair{}, fmt.Errorf("keyholder: socket path %q is %d bytes, over the %d-byte limit: set a shorter XDG_STATE_HOME", p, len(p), MaxSocketPath)
-		}
+	if err := l.checkSocketPaths(ly); err != nil {
+		return Pair{}, err
 	}
 	if rec, ok := readRecord(ly.record); ok {
 		live, err := l.pairLive(ctx, ly)

@@ -33,7 +33,10 @@ var (
 	systemctlBin  = ""
 )
 
-func init() { keyholder.SetSystemdPins(systemdRunBin, systemctlBin) }
+func init() {
+	keyholder.SetSystemdPins(systemdRunBin, systemctlBin)
+	keyholder.SetSSHPins(sshAddBin, sshKeygenBin)
+}
 
 // errSessionKeyToolUnpinned is what a build without a tool's pin yields.
 var errSessionKeyToolUnpinned = errors.New("this build has no pinned path for the tool and the key holder never looks a tool up on PATH")
@@ -116,7 +119,7 @@ func registerSessionKeyCommand(app *command.App) {
 		Description: command.Description{
 			Short: "Print a session's key holder public key and fingerprint",
 			Long: "Prints exactly two lines on stdout: the public key line exactly as the session's holder lists it (authorized_keys form) and its SHA256 fingerprint. " +
-				"With --json: {session, public_key, fingerprint, cert_path, cert_expires, cert_matches_key, cert_problem, vouched}; vouched is always the sentence \"" + sessionKeyVouched + "\" (text mode prints it on stderr): the record the key is checked against is a file beside the holder's socket, and any unconfined session of this account could have replaced a holder and written it, so the printed key is vouched for only against confined sessions; session is always the canonical session key (<repo>/<branch>), whatever form was passed. cert_path is where the certificate is installed (write then rename, into its directory only); " +
+				"With --json: {session, public_key, fingerprint, cert_path, cert_expires, cert_matches_key, cert_problem, vouched, agent_sock, agent_unit, fibby_unit}; vouched is always the sentence \"" + sessionKeyVouched + "\" (text mode prints it on stderr): the record the key is checked against is a file beside the holder's socket, and any unconfined session of this account could have replaced a holder and written it, so the printed key is vouched for only against confined sessions; session is always the canonical session key (<repo>/<branch>), whatever form was passed. cert_path is where the certificate is installed (write then rename, into its directory only); " +
 				"cert_expires (UTC) and cert_matches_key are read from the installed file with ssh-keygen and are null until one is installed; cert_problem says why an installed file is unusable. " +
 				"A certificate for another key, an expired one or an unusable one is a warning on stderr; stdout stays the two lines. " +
 				"Fails with exit 1 when the session has no holder, its holder is not running, the socket lists more than one key, the listed line is not one clean key line (over 4 KiB, a control or format character, a type other than ssh-ed25519 and ecdsa-sha2-nistp256, a blob that is not base64), or the listed key is not the one spinclass recorded when it minted the pair (\"the holder's key changed since the pair started\"). " +
@@ -213,7 +216,12 @@ func runSessionKey(ctx context.Context, args json.RawMessage) error {
 			CertMatchesKey *bool      `json:"cert_matches_key"`
 			CertProblem    *string    `json:"cert_problem"`
 			Vouched        string     `json:"vouched"`
-		}{key, pub, fp, certPath, expires, matches, problem, sessionKeyVouched})
+			// The pair's units and socket, so a script can check that closing
+			// the session stopped them.
+			AgentSock string `json:"agent_sock"`
+			AgentUnit string `json:"agent_unit"`
+			FibbyUnit string `json:"fibby_unit"`
+		}{key, pub, fp, certPath, expires, matches, problem, sessionKeyVouched, pair.AgentSock, pair.AgentUnit, pair.FibbyUnit})
 	}
 	fmt.Fprintln(sessionKeyErr(), "session-key: "+sessionKeyVouched)
 	fmt.Fprintf(out, "%s\n%s\n", pub, fp)

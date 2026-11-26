@@ -11,6 +11,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/bravo/validate"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
@@ -18,6 +19,21 @@ func init() {
 	spawn.KeyholderEnv = func(home, repoPath, sessionKey string) (map[string]string, func(), error) {
 		return keyholderSessionEnvUndo(home, repoPath, sessionKey, os.Stderr)
 	}
+	spawn.KeyholderPreflight = keyholderPreflight
+}
+
+// keyholderPreflight says whether a worker's pair could start: nil with the
+// switch off, else every precondition that does not hold.
+func keyholderPreflight(home, repoPath, _ string) error {
+	sw, err := resolveKeyholderSwitch(home, repoPath)
+	if err != nil || !sw.On {
+		return err
+	}
+	l, err := keyholderLauncherFn(keyholder.Tools{Fibby: sw.Fibby, Piggy: sw.Piggy})
+	if err != nil {
+		return err
+	}
+	return keyholder.PreflightError(l.Preflight(context.Background()))
 }
 
 // keyholderLauncherFn builds the launcher for the real system from the two
@@ -34,7 +50,7 @@ var keyholderLauncherFn = realKeyholderLauncher
 func realKeyholderLauncher(tools keyholder.Tools) (*keyholder.Launcher, error) {
 	for _, p := range []struct{ name, path string }{{"fibby", tools.Fibby}, {"piggy", tools.Piggy}} {
 		if err := sweatfileio.CheckKeyholderToolPath(p.name, p.path); err != nil {
-			return nil, fmt.Errorf("the key holder is on but %w: a pair is never started from a name looked up on PATH", err)
+			return nil, fmt.Errorf("the key holder is on but %w: a pair is never started from a name looked up on PATH\n    next: %s", err, validate.KeyholderProgramNext)
 		}
 	}
 	return newKeyholderLauncher(tools), nil
@@ -109,9 +125,12 @@ func keyholderSessionEnvUndo(home, repoPath, sessionKey string, stderr io.Writer
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := keyholder.PreflightError(l.Preflight(context.Background())); err != nil {
+		return nil, nil, err
+	}
 	pair, err := l.Start(context.Background(), sessionKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("starting the session's key holder: %w", err)
+		return nil, nil, fmt.Errorf("starting the session's key holder: %w\n    next: run `sc keyholder-selftest` to see the failing step, or run without the key holder: `sc keyholder-switch off`", err)
 	}
 	if pair.Reminted != nil {
 		// Every launch, resume, spawn, start hand-off and restart comes through

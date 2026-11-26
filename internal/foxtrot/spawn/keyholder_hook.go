@@ -15,6 +15,11 @@ import (
 // to close the pair.
 var KeyholderEnv func(home, repoPath, sessionKey string) (env map[string]string, undo func(), err error)
 
+// KeyholderPreflight, when set (cmd/spinclass sets it), refuses a spawn whose
+// key holder cannot start, before anything is created. nil error when the
+// [keyholder] switch is off.
+var KeyholderPreflight func(home, repoPath, sessionKey string) error
+
 // withKeyholderEnv returns sessionEnv with kh laid over it and every other
 // variable that names the operator's agent emptied, including one a configured
 // entry env set; sessionEnv itself is never modified.

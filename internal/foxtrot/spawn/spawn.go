@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/safeio"
 	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
@@ -192,6 +193,14 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 		}
 	}
 
+	// Before anything is minted or created: a key holder that cannot start
+	// refuses the spawn here, with what to do about it.
+	if KeyholderPreflight != nil {
+		if err := KeyholderPreflight(home, repoPath, rp.SessionKey); err != nil {
+			return Pending{}, err
+		}
+	}
+
 	var authorizingGrant string
 	var undoLink func()
 	if effective != "" {
@@ -228,13 +237,17 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	// tolerable. There is deliberately no spawn-session parameter for it: a
 	// driver agent must not be able to wave away its worker's stale toolchain,
 	// so only the repo's owner can opt out (spinclass#250).
-	if _, err := shop.Create(io.Discard, rp, shop.CreateOpts{
+	existed, err := shop.Create(io.Discard, rp, shop.CreateOpts{
 		AllowStaleBase:    merged.AllowStaleBase(),
 		AllowNoCredential: merged.AllowNoCredential(),
-	}, nil); err != nil {
+	}, nil)
+	if err != nil {
 		undoOnFailure()
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
+	// The commit the worktree was made at: a rollback removes it only while
+	// that is still its HEAD.
+	createdAt, _ := git.RevParse(rp.AbsPath, "HEAD")
 
 	// The worker's dotenv, rendered once for both the launch environment and
 	// (confined) the unit spec; nil when no trusted layer declares any.
@@ -251,45 +264,43 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 		kh, undo, err = KeyholderEnv(home, repoPath, rp.SessionKey)
 		if err != nil {
 			undoOnFailure()
-			return Pending{}, err
+			return Pending{}, refusedAfterCreate(rp, existed, createdAt, err)
 		}
 		undoKeyholder = undo
 	}
-	// undoStart rolls back what this start created: the pair (only when this
-	// start launched it) and the worktree.
-	undoStart := func() {
+	// refuse rolls back what this spawn made, for a failure before any worker
+	// was started: the pair (only when this spawn launched it), the profile
+	// link and the worktree with its branch.
+	refuse := func(cause error) (Pending, error) {
 		if undoKeyholder != nil {
 			undoKeyholder()
 		}
 		undoOnFailure()
+		return Pending{}, refusedAfterCreate(rp, existed, createdAt, cause)
 	}
 
 	var confine *confinedLaunch
 	if confined {
 		stateDir, err := confinementStateDir()
 		if err != nil {
-			undoStart()
-			return Pending{}, err
+			return refuse(err)
 		}
 		// The ONE operator switch of the bridge, [confinement] bridge, read from
 		// trusted layers only; a value it does not know refuses the spawn before
 		// anything is bound.
 		bridgeMode, err := BridgeModeFromKnob(targetConfine.policy.Bridge)
 		if err != nil {
-			undoOnFailure()
-			return Pending{}, err
+			return refuse(err)
 		}
 		// The frontend creates the worker's hello dir before the unit starts: a
 		// bind needs an existing source, and the unit cannot create it.
 		handshakeDir := spawnhandshake.SessionDir(stateDir, rp.AbsPath)
 		if err := os.MkdirAll(handshakeDir, 0o755); err != nil {
-			undoStart()
-			return Pending{}, fmt.Errorf("creating the worker's handshake dir: %w", err)
+			return refuse(fmt.Errorf("creating the worker's handshake dir: %w", err))
 		}
 		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable, dotenv, kh, bridgeMode)
 		if err != nil {
-			undoStart()
-			return Pending{}, err
+			return refuse(err)
 		}
 		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir, handshakeDir: handshakeDir}
 	}

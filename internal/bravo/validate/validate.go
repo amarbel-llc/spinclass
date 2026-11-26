@@ -2,6 +2,7 @@ package validate
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/folio"
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/0/tap"
@@ -1020,6 +1022,21 @@ func keyholderEffectivelyOn(layerOn bool) bool {
 // the default is none, so a build or test that does not set it reports nothing.
 var KeyholderSessionNotes = func() []string { return nil }
 
+// KeyholderProgramNext is what to do when [keyholder] fibby or piggy cannot be
+// run, said the same way by `sc validate` and by a refused launch.
+const KeyholderProgramNext = "set [keyholder] fibby and piggy to store programs in a sweatfile above the repo (the host's configuration writes them), then run `sc validate`; to run without the key holder: `sc keyholder-switch off`"
+
+// keyholderTurnOn is how a person turns the key holder on.
+const keyholderTurnOn = "to turn it on: set [keyholder] mode = \"on\" with fibby and piggy in a sweatfile above the repo, or run `sc keyholder-switch on` at a terminal"
+
+// KeyholderPreflight is everything else a pair needs that can be checked
+// without starting one: the same checks a spawn makes before it creates
+// anything. A variable so a test, whose build pins no tool, can aim it.
+var KeyholderPreflight = func() []keyholder.Problem {
+	l := &keyholder.Launcher{Base: keyholder.StateBase(), Run: keyholder.SystemdRunner{}}
+	return l.Preflight(context.Background())
+}
+
 // CheckKeyholderEffective reports the key holder as a launch would see it: the
 // effective mode across every layer above the repo (the last one that sets it
 // wins), always as one line "key holder: on" or "key holder: off", and, when it
@@ -1049,18 +1066,29 @@ func CheckKeyholderEffective(h sweatfile.Hierarchy, home, repoRoot string) []Iss
 		}
 	}
 	if !on {
-		return []Issue{{Message: "key holder: off (source: none; no layer above the repo sets [keyholder] mode = \"on\"; sessions run on the operator's agent)", Severity: SeverityWarning, Field: "keyholder"}}
+		return []Issue{{Message: "key holder: off (source: none; no layer above the repo sets [keyholder] mode = \"on\"; sessions run on the operator's agent; " + keyholderTurnOn + ")", Severity: SeverityWarning, Field: "keyholder"}}
 	}
 	issues := []Issue{{Message: fmt.Sprintf("key holder: on (source: %s; a launch of a session spinclass starts needs both fibby and piggy below)", source), Severity: SeverityWarning, Field: "keyholder"}}
 	fibby, piggy, _ := sweatfileio.TrustedKeyholderTools(h, home, repoRoot)
 	for _, p := range []struct{ name, path string }{{"fibby", fibby}, {"piggy", piggy}} {
 		if err := sweatfileio.CheckKeyholderToolPath(p.name, p.path); err != nil {
 			issues = append(issues, Issue{
-				Message:  err.Error() + ": every start, resume and spawn is refused until it is fixed (the host's configuration writes it; set mode \"off\" to turn the key holder off)",
+				Message:  err.Error() + ": every start, resume and spawn is refused until it is fixed; next: " + KeyholderProgramNext,
 				Severity: SeverityError,
 				Field:    "keyholder." + p.name,
 			})
 		}
+	}
+	problems := KeyholderPreflight()
+	for _, p := range problems {
+		issues = append(issues, Issue{
+			Message:  p.What + ": every start, resume and spawn is refused until it is fixed; next: " + p.Next,
+			Severity: SeverityError,
+			Field:    "keyholder." + p.Name,
+		})
+	}
+	if len(issues) == 1 {
+		issues[0].Message += "; to prove a pair really starts: `sc keyholder-selftest`"
 	}
 	return issues
 }

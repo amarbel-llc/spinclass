@@ -53,6 +53,9 @@ func TestTheJSONGoldenHasExactlyTheDocumentedFieldsInTheDocumentedShapes(t *test
 		CertMatchesKey *bool      `json:"cert_matches_key"`
 		CertProblem    *string    `json:"cert_problem"`
 		Vouched        string     `json:"vouched"`
+		AgentSock      string     `json:"agent_sock"`
+		AgentUnit      string     `json:"agent_unit"`
+		FibbyUnit      string     `json:"fibby_unit"`
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -63,13 +66,13 @@ func TestTheJSONGoldenHasExactlyTheDocumentedFieldsInTheDocumentedShapes(t *test
 	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"session", "public_key", "fingerprint", "cert_path", "cert_expires", "cert_matches_key", "cert_problem", "vouched"} {
+	for _, f := range []string{"session", "public_key", "fingerprint", "cert_path", "cert_expires", "cert_matches_key", "cert_problem", "vouched", "agent_sock", "agent_unit", "fibby_unit"} {
 		if _, present := generic[f]; !present {
 			t.Errorf("the golden lacks the field %q", f)
 		}
 	}
-	if len(generic) != 8 {
-		t.Errorf("the golden has %d fields, want exactly 8: %v", len(generic), generic)
+	if len(generic) != 11 {
+		t.Errorf("the golden has %d fields, want exactly 11: %v", len(generic), generic)
 	}
 	if doc.Vouched != sessionKeyVouched {
 		t.Errorf("vouched = %q, want %q", doc.Vouched, sessionKeyVouched)
@@ -93,12 +96,17 @@ func TestTheJSONGoldenHasExactlyTheDocumentedFieldsInTheDocumentedShapes(t *test
 func TestTheCommandStillWritesTheGoldensByteForByte(t *testing.T) {
 	txt := strings.Split(strings.TrimSuffix(readGolden(t, "session-key.txt.golden"), "\n"), "\n")
 	var doc struct {
-		Session string `json:"session"`
+		Session   string `json:"session"`
+		AgentSock string `json:"agent_sock"`
+		AgentUnit string `json:"agent_unit"`
+		FibbyUnit string `json:"fibby_unit"`
 	}
 	if err := json.Unmarshal([]byte(readGolden(t, "session-key.json.golden")), &doc); err != nil {
 		t.Fatal(err)
 	}
 	e := useSessionKeySeams(t)
+	e.pair.AgentSock = strings.Replace(doc.AgentSock, "/state/spinclass/keyholder", e.base, 1)
+	e.pair.AgentUnit, e.pair.FibbyUnit = doc.AgentUnit, doc.FibbyUnit
 	sessionKeyAgentList = func(context.Context, string) ([]byte, error) { return []byte(txt[0] + "\n"), nil }
 	sessionKeyFingerprint = func(context.Context, string) (string, error) { return txt[1], nil }
 	// The fingerprint recorded at the mint is the key's own: the command refuses a
