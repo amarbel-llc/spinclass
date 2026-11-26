@@ -1464,7 +1464,8 @@ under the passwd home (*~/.config/spinclass/sweatfile*), where it binds every
 launch whatever repo the caller names; a parent-directory layer alone is a
 limit, not a guarantee. Any process of the account can edit these files (same
 user): the switch is the operator's setting, not a boundary against a session
-that can write the operator's home.
+that can write the operator's home (tracked: spinclass#519 proposes an
+operator-only flip that needs no deploy).
 
 *mode*
 	*"off"* or *"on"*; unset means *"off"*. With *"on"* every WORKER session
@@ -1578,17 +1579,21 @@ that can write the operator's home.
 	switch removes the pointers and the habit. Withholding the sockets is the
 	confined unit's job: with the switch on, a confined unit's spec binds only the
 	session's holder socket (never the operator's agent) and refuses the launch
-	when there is no live holder socket.
+	when there is no live holder socket. The limits of this build are tracked:
+	spinclass#515 (no wall between unconfined sessions of one account),
+	spinclass#518 (a terminal is not the operator) and spinclass#521 (the
+	certificate route has not run end to end).
 
 	*What switching off does.* Setting *mode* to *"off"* (or removing the table)
 	starts nothing for new sessions and leaves nothing behind for them: no unit,
 	no directory, an untouched environment. It does NOT touch the pairs of
 	sessions that already have one: each runs until its session is closed (*sc
 	close* stops a session's pair whatever the switch says now), a resumed
-	unconfined worker goes back to the operator's agent while its pair idles, and
-	a confined session spawned with a holder is refused on resume (close it and
-	spawn a new one). To end every pair now, run *sc keyholder-stop --all* at a
-	terminal.
+	unconfined worker goes back to the operator's agent while its pair idles
+	(tracked: spinclass#517), and a confined session spawned with a holder is
+	refused on resume (close it and spawn a new one). To end one session's pair,
+	run *sc keyholder-stop SESSION*; to end every pair now, run at a terminal
+	*sc keyholder-stop --all*.
 
 	*Recovery.* *sc keyholder-stop --all --dry-run* lists every pair (one line
 	each: its hash, its session, running or stopped) and marks the ORPHANS: pairs
@@ -1671,8 +1676,8 @@ that can write the operator's home.
 	session-key SESSION* shows the new key and *sc list* shows *RE-MINTED* until a
 	certificate for it is installed. *sc session-key* itself refuses to print a key
 	other than the one recorded at the mint, so a key replaced behind the pair's
-	back is never certified unnoticed; the answer is to stop the pair and start it
-	again.
+	back is never certified unnoticed; the answer is *sc keyholder-stop SESSION*,
+	after which *sc resume SESSION* starts a new pair (a new key, announced).
 
 	*Limits.* Between unconfined sessions of one account there is no wall. The
 	fingerprint *sc session-key* checks a key against is a file beside the holder's
@@ -1685,8 +1690,10 @@ that can write the operator's home.
 	is, confined ones. *sc keyholder-pair* start and stop need stdin and stdout on a
 	terminal (the live recipes set *SPINCLASS_KEYHOLDER_PAIR_RECIPE=1*, which any
 	process of the account can set too: it keeps out an accident, not an attacker).
-	A wall between unconfined sessions is a later design item
-	(docs/plans/2026-11-25-key-holder.md, "Stated limits").
+	A wall between unconfined sessions is tracked as spinclass#515 (design
+	options in docs/plans/2026-11-25-key-holder.md, "Stated limits"); that "a
+	terminal" is not the operator is spinclass#518. The low-severity findings
+	left open by the reviews are listed in spinclass#523.
 
 	*Sessions that already run.* Turning the switch on starts nothing for them. An
 	unconfined worker launched before it, or without a pair, keeps the operator's
@@ -1695,24 +1702,27 @@ that can write the operator's home.
 	validate* say "holder: none, operator agent" for each such live worker. A
 	restart does not convert it: resume it (an unconfined session then gets its
 	pair), or close it and spawn a new one; a confined one is refused until it is
-	closed and respawned.
+	closed and respawned. Tracked: spinclass#517.
 
 	*The two units.* The holder's unit is bound to fibby's (*BindsTo=*, *After=*),
 	so fibby stopping stops the agent. The other direction is not tied, nothing
 	watches a pair that dies while the session runs, and a running confined unit
 	never sees a replaced pair (its spec binds the socket file, and a replaced pair
-	is a new one); the next resume or restart repairs it.
+	is a new one); the next resume or restart repairs it. Tracked: spinclass#516
+	(a heartbeat, and a directory bind for the socket).
 
 	*What a worker's jobs inherit.* A worker's merge, check, post-merge and hook
 	jobs run from its frontend, whose *SSH_AUTH_SOCK* is the holder: they are the
 	session's own work, and that is meant. A post-merge target that needs the
 	operator's agent (a deploy, an rsync, anything over ssh) therefore fails AFTER
 	the merge has landed; a worker merges with no targets and the coordinator
-	deploys, or the operator names an exception.
+	deploys, or the operator names an exception. Tracked: spinclass#522.
 
 	*Implicit sessions: no holder in this build.* An agent the operator starts
 	himself in a main checkout is not given a holder and keeps his agent (see
-	above); the direction for later is in docs/plans/2026-11-25-key-holder.md.
+	above); the direction for later (a holder for every session and an explicit
+	operator blessing) is tracked as spinclass#520 and written up in
+	docs/plans/2026-11-25-key-holder.md.
 
 ## [host-queue]
 

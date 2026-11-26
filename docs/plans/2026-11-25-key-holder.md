@@ -1,7 +1,14 @@
 # Per-session key holder (plan)
 
-Status: in review (round 2 findings fixed; round 3 of 3 next). The switch is `[keyholder] mode` in a trusted
-sweatfile layer, default off; reference text is in `spinclass-sweatfile(5)`.
+Status: merged with the switch off (reviewed in three rounds and two delta checks).
+The switch is `[keyholder] mode` in a trusted sweatfile layer, default off; reference
+text is in `spinclass-sweatfile(5)`. The stated limits and the open lows are tracked
+issues, not a meeting: spinclass#515 (no wall between unconfined sessions), #516
+(silent pair death, heartbeats), #517 (sessions that predate the switch), #518 (a
+terminal is not the operator), #519 (an operator-only flip with no deploy), #520
+(holders for every session, the blessing, rule B), #521 (the certificate route has
+not run end to end; an old frontend is not detectable), #522 (a worker's post-merge
+targets), #523 (the open lows).
 This file holds the decisions the manpage points at; it grows as findings close.
 
 ## Driver versus worker (ruled for this build: rule A)
@@ -299,7 +306,14 @@ cannot write.
   cannot be written warns and the stop still happens: stopping is the safe
   direction). A real stop needs a terminal; `--dry-run` lists and marks orphans
   and needs none. It needs neither the switch nor the trusted paths, so it works
-  after the host's configuration is gone.
+  after the host's configuration is gone. **`sc keyholder-stop SESSION`** (instead
+  of `--all`; exactly one of the two) stops that one session's pair under the same
+  rules (terminal, journal, key history kept marked stopped, NOT MINE and
+  `--including-unowned`); it is the command `sc session-key` names when a holder is
+  dead or its key changed, with `sc resume SESSION` to start the new pair (a new
+  key, announced). SESSION is a session key or worktree name; a key written
+  `<repo>/<branch>` also stops a pair whose session record is gone. The hidden
+  `sc keyholder-pair` is no longer named by any refusal.
 - **Orphans** are pairs with no live session: a directory with no readable
   record, units with no directory but a key history or lock file under this
   state root, a record naming a closed or vanished session (units with NO trace
@@ -366,8 +380,9 @@ These are limits of this build, said plainly; none is a pretend fix.
   start|stop` now needs stdin and stdout on a terminal, or the variable
   `SPINCLASS_KEYHOLDER_PAIR_RECIPE=1` the live recipes set (status only reads).
   The variable is NOT a boundary: any process of the account can set it. It keeps
-  the plain call, a driven script and an accident out; the wall is the Sunday item.
-  *For Sunday: where a record a session cannot write could live.* (1) The user
+  the plain call, a driven script and an accident out; the wall is the Sunday item
+  (tracked: spinclass#515; that "a terminal" is not the operator: spinclass#518).
+  *For Sunday (spinclass#515): where a record a session cannot write could live.* (1) The user
   manager's own unit properties, set at start (`systemd-run --property=` a
   description or an environment carrying the minted fingerprint, read back with
   `systemctl --user show`): a same-uid session can still `systemctl --user stop`
@@ -390,7 +405,7 @@ These are limits of this build, said plainly; none is a pretend fix.
   `BindsTo=` and `After=` fibby's, so fibby going away stops the agent and the
   half-dead state (an agent that still lists the key but can no longer sign)
   cannot exist; the live pair recipe stops fibby alone and asserts the agent unit
-  goes with it. NOT done, for Sunday: the agent dying does not stop fibby (the
+  goes with it. NOT done, for Sunday (tracked: spinclass#516): the agent dying does not stop fibby (the
   next start tears the pair down whole); nothing watches a pair that dies while
   the session runs (a heartbeat or an `ExecStopPost` that wakes), and a RUNNING
   confined unit never sees a replaced pair, because the spec binds the agent
@@ -406,7 +421,8 @@ These are limits of this build, said plainly; none is a pretend fix.
   landed. Either a worker merges with `targets=[]` and the coordinator deploys, or
   the operator names an exception; nothing here chooses for him.
 - **B-M7: implicit sessions: no holder in this build** (operator ruling: this
-  build keeps rule A; implicit sessions get holders on Sunday). See "Not given a
+  build keeps rule A; implicit sessions get holders on Sunday, tracked as
+  spinclass#520). See "Not given a
   holder in this build" above and "Later".
 
 ## A host that never switched it on launches as before (round 3, A-M1 / B-M2)
@@ -476,7 +492,7 @@ done out of order; every one fails closed and none exposes the operator's agent.
    `clown agent-scope-capabilities` lists `agent-unit`, `private-network`,
    `frontend-mcp-sockets` and the like, and carries no marker for this rule, and
    clown has no validate-only command to ask. So the order is a HARD requirement:
-   clown f502df21 first, then the switch.
+   clown f502df21 first, then the switch (tracked: spinclass#521).
 3. **Lingering is enabled** for the user: `loginctl enable-linger <user>`. The pair
    is two transient USER units; a user manager that exits at the last logout takes
    every key with it, announced at the next resume of each session (K3's notice). A
@@ -520,7 +536,7 @@ builds (`packages.default`) carry them.
 
 ## Later
 
-For Sunday's review, not this build. Every session gets a holder, the ones the
+For Sunday's review, not this build (tracked: spinclass#520). Every session gets a holder, the ones the
 operator starts himself included, and his agent reaches a session only by an
 explicit blessing: an operator act (never a tool a session can call; at his
 terminal or with his card), time-limited, saying what it blesses (his agent, for
