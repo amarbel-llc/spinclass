@@ -65,7 +65,7 @@ func keyholderEvidenceRoots() []string {
 	}
 	add(keyholderStateBaseFn())
 	if pw, err := keyholderPasswdHomeFn(); err == nil {
-		add(filepath.Join(pw, ".local", "state", "spinclass", "keyholder"))
+		add(keyholder.PasswdStateBase(pw))
 	}
 	return roots
 }

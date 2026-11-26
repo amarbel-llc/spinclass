@@ -45,17 +45,9 @@ type keyholderEffective struct {
 // directory does, for the bare command and for host-load. It never prints the
 // one-line warning of a soft failure (a read-only report is not a launch).
 func describeKeyholderSwitch() keyholderEffective {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		pw, perr := keyholderPasswdHomeFn()
-		if perr != nil {
-			return keyholderEffective{Source: "none", Err: fmt.Errorf("neither $HOME nor the account database names a home: %v", perr)}
-		}
-		home = pw
-	}
-	repo := driverRepoPath()
-	if repo == "" {
-		repo = home
+	home, repo, err := keyholderCallerContext()
+	if err != nil {
+		return keyholderEffective{Source: "none", Err: err}
 	}
 	prev := keyholderWarnWriter
 	keyholderWarnWriter = io.Discard
@@ -66,6 +58,60 @@ func describeKeyholderSwitch() keyholderEffective {
 		e.On, e.Source = false, "refused"
 	}
 	return e
+}
+
+// keyholderCallerContext is the home and the repo a launch from the working
+// directory resolves the switch for.
+func keyholderCallerContext() (home, repo string, err error) {
+	home, herr := os.UserHomeDir()
+	if herr != nil || home == "" {
+		pw, perr := keyholderPasswdHomeFn()
+		if perr != nil {
+			return "", "", fmt.Errorf("neither $HOME nor the account database names a home: %v", perr)
+		}
+		home = pw
+	}
+	repo = keyholderCallerRepoFn()
+	if repo == "" {
+		repo = home
+	}
+	return home, repo, nil
+}
+
+// keyholderCallerRepoFn is the repo the working directory is in. A seam for tests.
+var keyholderCallerRepoFn = driverRepoPath
+
+// refuseOnWithoutPrograms is L-1 of the switch review: `on` is not written when
+// it would refuse every worker launch, because no trusted [keyholder] layer
+// supplies fibby and piggy. The layers are read the way a launch from here reads
+// them (without the switch file: it is about to change); a layer that cannot be
+// read is a refusal as well.
+func refuseOnWithoutPrograms() error {
+	home, repo, err := keyholderCallerContext()
+	if err != nil {
+		return fmt.Errorf("keyholder-switch: %w", err)
+	}
+	prev := keyholderWarnWriter
+	keyholderWarnWriter = io.Discard
+	defer func() { keyholderWarnWriter = prev }()
+	sw, err := resolveKeyholderLayersAndPasswd(home, repo)
+	if err != nil {
+		return fmt.Errorf("keyholder-switch: not writing on: reading the [keyholder] layers fails, so every worker launch would be refused: %w", err)
+	}
+	var missing []string
+	if sw.Fibby == "" {
+		missing = append(missing, "fibby")
+	}
+	if sw.Piggy == "" {
+		missing = append(missing, "piggy")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("keyholder-switch: not writing on: no trusted [keyholder] layer sets %s, so every worker launch would be refused. The host's configuration writes `fibby = \"/nix/store/.../bin/fibby\"` and `piggy = \"/nix/store/.../bin/piggy\"` under [keyholder] in the global sweatfile (~/.config/spinclass/sweatfile) or a layer above the repo; nothing was changed", strings.Join(missing, " and "))
+	}
+	if sw.ToolConflict != nil {
+		return fmt.Errorf("keyholder-switch: not writing on: %w", sw.ToolConflict)
+	}
+	return nil
 }
 
 // String is the one line `sc host-load` shows (and the bare command prints
@@ -114,6 +160,12 @@ func runKeyholderSwitch(_ context.Context, p keyholderSwitchParams) error {
 	if err != nil {
 		return fmt.Errorf("keyholder-switch: resolving the account's home: %w (the switch file lives under it, never under $HOME alone)", err)
 	}
+	if want == sweatfileio.KeyholderSwitchOn {
+		// L-1: do not write on when it would refuse every worker launch.
+		if err := refuseOnWithoutPrograms(); err != nil {
+			return err
+		}
+	}
 	old, present, rerr := sweatfileio.ReadKeyholderSwitch(pw)
 	oldWord := string(old)
 	switch {
@@ -122,8 +174,36 @@ func runKeyholderSwitch(_ context.Context, p keyholderSwitchParams) error {
 	case !present:
 		oldWord = "absent"
 	}
+	// L-6: on leaves a marker under EVERY state root the evidence gate reads (the
+	// one the operator's environment names and the account's own, so neither a
+	// different XDG_STATE_HOME nor a failing account lookup can hide it): a later
+	// failure to look up the account's home refuses launches instead of warning and
+	// proceeding on the operator's agent. It is written BEFORE the file, so there is
+	// never an on file without it; off and default take it away afterwards.
+	roots := keyholderEvidenceRoots()
+	var wrote []string
+	if want == sweatfileio.KeyholderSwitchOn {
+		for _, root := range roots {
+			had := keyholder.HasSwitchMarker(root)
+			if err := keyholder.WriteSwitchMarker(root); err != nil {
+				removeSwitchMarkers(wrote)
+				return fmt.Errorf("keyholder-switch: nothing was changed: leaving the evidence marker under %s: %w", root, err)
+			}
+			if !had {
+				wrote = append(wrote, root)
+			}
+		}
+	}
 	if err := sweatfileio.WriteKeyholderSwitch(pw, want); err != nil {
+		removeSwitchMarkers(wrote)
 		return fmt.Errorf("keyholder-switch: %w", err)
+	}
+	if want != sweatfileio.KeyholderSwitchOn {
+		for _, root := range roots {
+			if err := keyholder.RemoveSwitchMarker(root); err != nil {
+				fmt.Fprintf(errOut, "keyholder-switch: warning: %v (the switch file was changed all the same)\n", err)
+			}
+		}
 	}
 	rec := keyholderJournalRecord{
 		At: operatorHandleNow(), Actor: "tty", Action: "switch", Result: "set",
@@ -136,11 +216,24 @@ func runKeyholderSwitch(_ context.Context, p keyholderSwitchParams) error {
 	fmt.Fprintln(out, "this decides NEW launches only: it stops no running pair (`sc keyholder-stop --all` does), and sessions already running keep what they have")
 	fmt.Fprintln(out, "limit (issue #515): any process of this account can write this file, as you can; it is the operator's setting, not a wall against the account's own sessions")
 	if want == sweatfileio.KeyholderSwitchOn {
+		var paths []string
+		for _, root := range roots {
+			paths = append(paths, keyholder.SwitchMarkerPath(root))
+		}
+		fmt.Fprintf(out, "evidence marker left (%s): a failure to look up the account's home now refuses launches instead of warning and proceeding on the operator's agent; `off` or `default` removes it\n", strings.Join(paths, ", "))
 		if e := describeKeyholderSwitch(); e.Err != nil {
 			fmt.Fprintf(errOut, "keyholder-switch: warning: %s\n", e)
 		}
 	}
 	return nil
+}
+
+// removeSwitchMarkers takes back the markers this run left when the change did
+// not go through.
+func removeSwitchMarkers(roots []string) {
+	for _, root := range roots {
+		_ = keyholder.RemoveSwitchMarker(root)
+	}
 }
 
 // ttyName is the terminal stdin is, best effort, for the journal.
