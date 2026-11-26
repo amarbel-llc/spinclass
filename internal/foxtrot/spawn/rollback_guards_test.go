@@ -195,6 +195,28 @@ func TestRollbackKeepsATreeGitCannotAnswerAbout(t *testing.T) {
 	keepsWithoutClosing(t, rp, false, head, record)
 }
 
+func TestARollbackLeavesAnUnreadableSessionRecordAlone(t *testing.T) {
+	rp, head, record := madeTree(t)
+	if err := session.Write(record); err != nil {
+		t.Fatal(err)
+	}
+	records, err := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "spinclass", "records", "*.json"))
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %v, %v: want the one just written", records, err)
+	}
+	const garbage = "not a record"
+	if err := os.WriteFile(records[0], []byte(garbage), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := refusedAfterCreate(rp, true, head, record, errors.New("boom"))
+	if data, err := os.ReadFile(records[0]); err != nil || string(data) != garbage {
+		t.Errorf("the unreadable record was rewritten (%d bytes, %v)", len(data), err)
+	}
+	if !strings.Contains(got.Error(), "worktree remove --force "+rp.AbsPath) {
+		t.Errorf("no plain git command for a record sc close cannot read: %v", got)
+	}
+}
+
 // A failure after the pair started (here: the entry cannot be run) is rolled
 // back like one before it.
 func TestASpawnWhoseEntryCannotRunLeavesNothing(t *testing.T) {

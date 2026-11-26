@@ -1,8 +1,10 @@
 package spawn
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
@@ -57,14 +59,18 @@ func refusedAfterCreate(rp worktree.ResolvedPath, existed bool, head string, rec
 
 // removeCommand is the command that removes a worktree the rollback keeps:
 // `sc close`, which resolves a session record, so record is written when the
-// spawn had not got as far as writing one. Without a record (it cannot be
-// written) it is the plain git commands.
+// spawn had not got as far as writing one. A record that exists and cannot be
+// read is left as it is. Where `sc close` has no record to resolve (that one,
+// or one that cannot be written) it is the plain git commands.
 func removeCommand(rp worktree.ResolvedPath, record session.State, flags string) string {
-	if _, err := session.Read(rp.RepoPath, rp.Branch); err != nil {
+	plain := fmt.Sprintf("git -C %s worktree remove --force %s && git -C %s branch -D %s", rp.RepoPath, rp.AbsPath, rp.RepoPath, rp.Branch)
+	_, err := session.Read(rp.RepoPath, rp.Branch)
+	if errors.Is(err, os.ErrNotExist) {
 		record.SessionState = session.StateInactive
-		if werr := session.Write(record); werr != nil {
-			return fmt.Sprintf("git -C %s worktree remove --force %s && git -C %s branch -D %s", rp.RepoPath, rp.AbsPath, rp.RepoPath, rp.Branch)
-		}
+		err = session.Write(record)
+	}
+	if err != nil {
+		return plain
 	}
 	return "sc close " + rp.SessionKey + flags
 }
