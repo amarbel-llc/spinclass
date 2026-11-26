@@ -24,6 +24,7 @@ import (
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 	"code.linenisgreat.com/spinclass/internal/bravo/nixgc"
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
@@ -142,6 +143,12 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 	// and issue #67 for the empirical reproduction.
 	gcPlan := planNixGCForClean(wt.repoPath, wt.worktreePath)
 
+	// The session's key holder pair goes with it. One that will not stop keeps
+	// the worktree and its record.
+	if err := stopWorktreeKeyholder(tw, wt); err != nil {
+		return err
+	}
+
 	// Revoke the session's forge push credential (FDR 0028) before the
 	// worktree goes — closing the gap where a merged worktree reaped here
 	// would orphan its token. Best-effort; the orphan sweep is the backstop.
@@ -162,6 +169,21 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 
 	if gcPlan != nil {
 		runReap(tw, *gcPlan, wt.branch)
+	}
+	return nil
+}
+
+func stopWorktreeKeyholder(tw *tap.Writer, wt worktreeInfo) error {
+	key := filepath.Base(wt.repoPath) + "/" + wt.branch
+	if st, rerr := session.Read(wt.repoPath, wt.branch); rerr == nil && st.SessionKey != "" {
+		key = st.SessionKey
+	}
+	stopped, err := keyholdersweep.StopSession(context.Background(), key)
+	if err != nil {
+		return fmt.Errorf("keeping worktree %s, its key holder would not stop: %w (%s, then run sc clean again)", wt.branch, err, keyholdersweep.Recovery(key))
+	}
+	if stopped && tw != nil {
+		tw.Ok("stop key holder " + wt.branch)
 	}
 	return nil
 }

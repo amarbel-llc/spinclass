@@ -1708,7 +1708,10 @@ holder against the operator's off cannot be started.
 	needs neither the switch nor the *fibby* and *piggy* paths, so it still works
 	after the host's configuration is gone. *sc clean* stops the orphans only (a
 	pair younger than ten minutes with no record is a launch in flight and is left
-	alone).
+	alone). Every removal of a session stops its pair first: *sc close* (also the
+	close *sc start* makes itself), the teardown of a merge run from outside the
+	session (*--merge-on-close* included) and *sc clean* removing a merged
+	worktree. In the last two a pair that will not stop keeps the worktree.
 
 	*Whose pairs these are.* Units are per user, but the state directory follows
 	*$XDG_STATE_HOME*, so a shell with another state home sees every pair of the

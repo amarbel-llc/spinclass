@@ -5,27 +5,13 @@ import (
 	"fmt"
 	"os"
 
-	"code.linenisgreat.com/spinclass/internal/0/keyholder"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
-// stopKeyholder is the seam over the key holder teardown for tests: it stops
-// the session's pair (holder, then fibby, then their directories) and reports
-// whether there was a pair to stop. A session that never had one costs a stat.
-var stopKeyholder = func(ctx context.Context, sessionKey string) (bool, error) {
-	base := keyholder.StateBase()
-	l := &keyholder.Launcher{Base: base, Run: keyholder.SystemdRunner{}}
-	if _, err := os.Lstat(keyholder.SessionDir(base, sessionKey)); err != nil {
-		// No pair directory: the operator stopped the pair earlier (the key history
-		// is kept, marked stopped), a start failed, or it is a driver, which never
-		// had one. The session's key history, kind record and lock file end with the
-		// session in EVERY one of those states: a later session with the same key
-		// must not inherit a stale history and be told its first key "replaced" one.
-		return false, l.ForgetSession(ctx, sessionKey)
-	}
-	return true, l.Stop(ctx, sessionKey)
-}
+// stopKeyholder is the seam over the shared key holder teardown for tests.
+var stopKeyholder = keyholdersweep.StopSession
 
 // stopSessionKeyholder ends the session's key holder pair whatever the switch
 // says now: a pair a session had before [keyholder] was turned off must not
@@ -40,12 +26,14 @@ func stopSessionKeyholder(tw *tap.Writer, sessionKey, branch string, force bool)
 		if tw != nil {
 			tw.NotOk(desc, map[string]string{"error": err.Error()})
 		}
-		return fmt.Errorf("stopping the key holder of %s: %w (use --force to close anyway)", branch, err)
+		return fmt.Errorf("stopping the key holder of %s: %w (%s, or use --force to close anyway)", branch, err, keyholdersweep.Recovery(sessionKey))
 	case err != nil:
+		// Closing anyway: the pair is left behind, so say how to stop it.
+		msg := err.Error() + "; " + keyholdersweep.Recovery(sessionKey)
 		if tw != nil {
-			tw.NotOk(desc, map[string]string{"severity": "warn", "message": err.Error()})
+			tw.NotOk(desc, map[string]string{"severity": "warn", "message": msg})
 		} else {
-			fmt.Fprintf(os.Stderr, "spinclass: %s failed: %v\n", desc, err)
+			fmt.Fprintf(os.Stderr, "spinclass: %s failed: %s\n", desc, msg)
 		}
 	case stopped && tw != nil:
 		tw.Ok(desc)

@@ -12,6 +12,7 @@ package keyholdersweep
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -109,6 +110,29 @@ func LiveSessionKeys() (map[string]bool, error) {
 // have to be cleared. A var so a test can stand a fake runner in.
 var NewLauncher = func() *keyholder.Launcher {
 	return &keyholder.Launcher{Base: keyholder.StateBase(), Run: keyholder.SystemdRunner{}}
+}
+
+// StopSession ends a session's pair (holder, then fibby, then their
+// directories) and reports whether there was a pair to stop. It is the one
+// teardown step of every path that removes a session: close, the merge teardown
+// and clean. A session that never had a pair costs a stat.
+func StopSession(ctx context.Context, sessionKey string) (bool, error) {
+	l := NewLauncher()
+	if _, err := os.Lstat(keyholder.SessionDir(l.Base, sessionKey)); err != nil {
+		// No pair directory: the operator stopped the pair earlier (the key history
+		// is kept, marked stopped), a start failed, or it is a driver, which never
+		// had one. The session's key history, kind record and lock file end with the
+		// session in EVERY one of those states: a later session with the same key
+		// must not inherit a stale history and be told its first key "replaced" one.
+		return false, l.ForgetSession(ctx, sessionKey)
+	}
+	return true, l.Stop(ctx, sessionKey)
+}
+
+// Recovery is what to type when a session's pair would not stop. It takes the
+// session key, so it works after the worktree and the record are gone.
+func Recovery(sessionKey string) string {
+	return "run `sc keyholder-stop " + sessionKey + "` at a terminal"
 }
 
 // Survey finds every pair and classifies it: owned by a live session, an orphan,

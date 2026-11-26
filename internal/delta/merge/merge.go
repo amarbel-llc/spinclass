@@ -32,6 +32,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
+	"code.linenisgreat.com/spinclass/internal/bravo/keyholdersweep"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
@@ -1090,6 +1091,10 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 			// The autostash (#416) put uncommitted edits back after the prefix;
 			// removing the tree would take them with it (and git refuses to).
 			ts.Ok("keep worktree " + branch + " (uncommitted changes: " + strings.Join(dirty, ", ") + "; commit them or run sc close)")
+		} else if key := sessionKeyFor(repoPath, branch); !stopKeyHolder(ts, key, branch) {
+			// The worktree and its record stay: they are what is closed once the
+			// pair is gone.
+			ts.Ok("keep worktree " + branch + " (its key holder would not stop: " + keyholdersweep.Recovery(key) + ", then sc close " + key + ")")
 		} else {
 			// The worktree is about to go, and with it the session's credential
 			// file and state — revoke the per-session forge token first (FDR
@@ -1143,6 +1148,21 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	// warrant; abandoned state is reaped by `sc clean`.
 	_ = executor.RequestClose(repoPath, branch)
 	return nil
+}
+
+// stopKeyHolder ends the session's key holder pair before the teardown removes
+// its worktree, as one test point when there was a pair. false means it would
+// not stop.
+func stopKeyHolder(ts *crap.TestStream, sessionKey, branch string) bool {
+	stopped, err := keyholdersweep.StopSession(context.Background(), sessionKey)
+	switch {
+	case err != nil:
+		ts.NotOk("stop key holder "+branch, map[string]any{"severity": "warn", "message": err.Error()})
+		return false
+	case stopped:
+		ts.Ok("stop key holder " + branch)
+	}
+	return true
 }
 
 // SessionIsLive reports whether the session on branch still has a running

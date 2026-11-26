@@ -1,6 +1,7 @@
 package close
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 )
@@ -39,8 +42,15 @@ func TestStopSessionKeyholderFailsWithoutForceAndWarnsWithIt(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "key holder") || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("got %v, want a refusal naming the key holder and --force", err)
 	}
-	if err := stopSessionKeyholder(nil, "r/feature-x", "feature-x", true); err != nil {
+	if !strings.Contains(err.Error(), "sc keyholder-stop r/feature-x") {
+		t.Errorf("the refusal does not name the recovery command: %v", err)
+	}
+	var out bytes.Buffer
+	if err := stopSessionKeyholder(tap.NewWriter(&out), "r/feature-x", "feature-x", true); err != nil {
 		t.Errorf("--force must carry on: %v", err)
+	}
+	if !strings.Contains(out.String(), "sc keyholder-stop r/feature-x") {
+		t.Errorf("a forced close leaves the pair and does not say how to stop it (%d bytes of output)", out.Len())
 	}
 }
 
