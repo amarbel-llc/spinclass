@@ -71,6 +71,23 @@ func TestASpawnWhosePairFailsToStartLeavesNothing(t *testing.T) {
 	}
 }
 
+// The spawn says whether the worker got its own holder: what the caller prints.
+func TestASpawnReportsWhetherTheWorkerHasItsOwnKeyHolder(t *testing.T) {
+	for name, kh := range map[string]map[string]string{"own": {"SSH_AUTH_SOCK": "/holder/agent.sock"}, "none": nil} {
+		t.Run(name, func(t *testing.T) {
+			home, repoPath := newWorkerFixture(t, rollbackEntry)
+			withKeyholderHook(t, func(_, _, _ string) (map[string]string, func(), error) { return kh, nil, nil })
+			p, err := LaunchDetachedWith(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "", ConfineDefault)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.OwnKeyHolder != (kh != nil) {
+				t.Errorf("OwnKeyHolder = %v", p.OwnKeyHolder)
+			}
+		})
+	}
+}
+
 // A worktree that holds work is never removed: the refusal names the command.
 func TestARefusedSpawnNeverRemovesAWorktreeThatHoldsWork(t *testing.T) {
 	cases := map[string]func(t *testing.T, wt string){

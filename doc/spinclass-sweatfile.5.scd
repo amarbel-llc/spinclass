@@ -1482,6 +1482,39 @@ limit, not a guarantee. Any process of the account can edit these files (same
 user): the switch is the operator's setting, not a boundary against a session
 that can write the operator's home (tracked: spinclass#515).
 
+*Check it.* Two commands say whether a key holder can work, before any session
+needs one.
+
+- *sc validate* shows *key holder: on* or *off* (off says how to turn it on).
+  With it on, there is one failing point for each thing a pair needs and does not
+  have, each ending in *next:* and what to do: *keyholder.fibby* and
+  *keyholder.piggy* (set them in a sweatfile above the repo);
+  *keyholder.systemd-run*, *keyholder.systemctl*, *keyholder.ssh-add* and
+  *keyholder.ssh-keygen* (this build has no usable built-in path: run the
+  packaged spinclass); *keyholder.user-manager* (the systemd user manager does
+  not answer: *loginctl enable-linger*, and a shell with *XDG_RUNTIME_DIR*);
+  *keyholder.state-dir* (a socket path is too long: a shorter *XDG_STATE_HOME*).
+  A start and a spawn make the same checks, and a spawn makes them before it
+  creates anything. A spawn that fails later, before its worker starts, removes
+  the worktree and branch it made, or, when they hold work, names the
+  *sc close* command.
+- *sc keyholder-selftest* starts a real pair for a throwaway key with the
+  trusted *fibby* and *piggy* (or *--fibby* and *--piggy*), whether or not the
+  mode is on, checks that the holder lists exactly its one key, makes and
+  verifies one signature, stops the pair and checks that nothing is left. It
+  needs no terminal. It exits 0 with the last stdout line
+  *keyholder-selftest: OK ...*, or 1 with *keyholder-selftest: FAILED at STEP:*
+  as the last line, where STEP is *settings*, *preconditions*, *start*,
+  *list-key*, *sign*, *stop* or *leftovers*, under a *next:* line. *--json*
+  prints one object instead: *ok*, *step* (*done* on success), *error*, *next*,
+  *session*, *agent_sock*, *agent_unit*, *fibby_unit*, *left_over*.
+
+A spawn (*sc spawn* and the spawn-session result) whose worker got its own
+holder adds one line, *key_holder: own (see its key: sc session-key SESSION)*;
+without a holder its output is unchanged. *sc list* says nothing about a healthy
+pair: its *keyholder* note (also in *--format json*) appears only when something
+needs doing.
+
 *The switch file (no deploy; spinclass#519).* The operator can flip the key
 holder without a deploy, in either direction, with *sc keyholder-switch on*,
 *off* or *default*, run at a terminal. It writes one word to
@@ -1557,8 +1590,10 @@ holder against the operator's off cannot be started.
 	For a session that is not confined this is delegation hygiene, not a
 	boundary. Switching it *"off"* leaves no pair, unit or directory for new
 	sessions. *sc session-key SESSION* prints the session's public key and
-	fingerprint (with *--json*, also where its certificate is installed and what
-	that certificate says). The certificate is one file, *cert/cert.pub*, in a
+	fingerprint (with *--json*, also where its certificate is installed, what
+	that certificate says, and the pair's *agent_sock*, *agent_unit* and
+	*fibby_unit*, so a script can check that *sc close* stopped them). The
+	certificate is one file, *cert/cert.pub*, in a
 	directory of the session's pair under *$XDG_STATE_HOME/spinclass/keyholder*
 	that the signer writes by rename and a confined unit gets read-only; the
 	session finds it at *$SPINCLASS_KEYHOLDER_CERT*. Any other value is an error:

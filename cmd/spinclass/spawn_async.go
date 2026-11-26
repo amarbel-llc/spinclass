@@ -187,5 +187,5 @@ func asyncSpawnResultText(pending spawn.Pending, driverPrincipal, jobID string, 
 	return fmt.Sprintf(
 		"spawning worker %s (worktree %s) — returned immediately. Its SessionStart hello is delivered as a job-wakeup on ringmaster job %q (hello-timeout %s): end your turn and let the wake arrive, do not poll. On hello the worker is up and will message %s via chat. On timeout, if the worker looks dead it is auto-reaped (nothing of value existed), else the wake names the dangling session to reap with close-child-session. Inspect via ringmaster's job_status/job_read with that id.",
 		pending.SessionKey, pending.WorktreePath, jobID, deadline.Round(time.Second), driverPrincipal,
-	)
+	) + keyHolderSpawnLine(pending.OwnKeyHolder, pending.SessionKey)
 }

@@ -2139,6 +2139,50 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     say "after stop: units=$units processes='${procs}' directories=$dirs"
     if [ "$units" = 0 ] && [ -z "$procs" ] && [ "$dirs" = 0 ]; then say "LIVE-OK one pair started, listed one key, stopped, nothing left"; else say "FAIL: leftovers"; find "$XDG_STATE_HOME" -mindepth 3 -maxdepth 3 -path '*keyholder/*' -printf 'live:   left: %P (%y %m)\n' 2>/dev/null; exit 1; fi
 
+# Run `sc keyholder-selftest` from this tree's packaged build against REAL services: once as it should pass (text and
+# --json) and once with a program that is not piggy, to see the message a person gets. One pair at a time (virtual
+# card, no PIN, scratch state dir); refuses while per-cpu 1-minute load is 1.0 or more; asserts nothing is left.
+#
+# run the key holder self-test for real, passing and failing
+[group("debug")]
+debug-keyholder-selftest-live fibby="" piggy="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    say() { printf 'selftest-live: %s\n' "$*"; }
+    load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
+    if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
+    out="$(nix build .#default --no-link --print-out-paths 2>/dev/null | tail -1)"
+    sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built"; exit 1; }
+    piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(readlink -f "$(command -v piggy)")" || { say "no piggy on PATH"; exit 1; }
+    fibby="{{ fibby }}"
+    if [ -z "$fibby" ]; then for c in /nix/store/*-fibby-holder-0.1.0/bin/fibby; do fibby="$c"; done; fi
+    [ -x "$fibby" ] || { say "no fibby holder build found"; exit 1; }
+    base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/khs.XXXXXX")"; chmod 0700 "$base"
+    trap 'rm -rf "$base"' EXIT
+    mkdir -m 0700 "$base/state"; export XDG_STATE_HOME="$base/state"
+    unset SSH_AUTH_SOCK PIGGY_AUTH_SOCK
+    units() { systemctl --user list-units --all --no-legend 'spinclass-keyholder-*' 2>/dev/null | grep -c spinclass-keyholder || true; }
+    before="$(units)"
+    say "spinclass=$sc"; say "fibby=$fibby"; say "piggy=$piggy"
+    say "== passing run"
+    "$sc" keyholder-selftest --fibby "$fibby" --piggy "$piggy" </dev/null; rc=$?
+    say "exit $rc"; [ "$rc" = 0 ] || exit 1
+    say "== passing run, --json"
+    "$sc" keyholder-selftest --fibby "$fibby" --piggy "$piggy" --json </dev/null; rc=$?
+    say "exit $rc"; [ "$rc" = 0 ] || exit 1
+    say "== forced failure: a program that is not piggy"
+    wrong="$(readlink -f "$(type -P true)")"; say "wrong piggy=$wrong"
+    "$sc" keyholder-selftest --fibby "$fibby" --piggy "$wrong" </dev/null; rc=$?
+    say "exit $rc"; [ "$rc" = 1 ] || { say "FAIL: want exit 1"; exit 1; }
+    say "== forced failure: a program that is not there"
+    "$sc" keyholder-selftest --fibby "$fibby" --piggy /nonexistent/piggy </dev/null; rc=$?
+    say "exit $rc"; [ "$rc" = 1 ] || { say "FAIL: want exit 1"; exit 1; }
+    sleep 1
+    after="$(units)"; dirs="$(find "$XDG_STATE_HOME" -mindepth 3 -maxdepth 3 -path '*keyholder/*' -type d 2>/dev/null | wc -l)"
+    say "key holder units before=$before after=$after, session directories left=$dirs"
+    if [ "$after" = "$before" ] && [ "$dirs" = 0 ]; then say "LIVE-OK"; else say "FAIL: leftovers"; exit 1; fi
+
 # Regenerate the `sc session-key` golden fixtures from the REAL binary and a REAL pair: a throwaway repo and session
 # in an isolated HOME and state dir, one fibby + holder pair (virtual card, no real card, no PIN, a throwaway minted
 # key: only its public key and fingerprint appear), then `sc session-key` in both forms. The state directory is

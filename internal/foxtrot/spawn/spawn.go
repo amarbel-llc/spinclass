@@ -48,6 +48,7 @@ type Result struct {
 	WorktreePath  string // absolute path to the worker's worktree
 	MultiplexerID string // the worker's session key (= SPINCLASS_SESSION_ID, #146)
 	PoshSessionID string // the worker's posh/clown session id from the hello (reattach target); empty if the worker reported none
+	OwnKeyHolder  bool   // the worker was launched on its own key holder, not the launcher's agent
 }
 
 // Pending is a spawned worker whose worktree exists and whose detached entry
@@ -60,6 +61,7 @@ type Pending struct {
 	WorktreePath string // absolute path to the worker's worktree
 	RepoPath     string // the worker repo's main checkout (for a timeout reap)
 	Branch       string // the worker's branch (for a timeout reap)
+	OwnKeyHolder bool   // the worker was launched on its own key holder
 
 	rp         worktree.ResolvedPath
 	driver     Driver
@@ -324,6 +326,7 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 		undoOnFailure()
 		return Pending{}, err
 	}
+	p.OwnKeyHolder = kh != nil
 	return p, nil
 }
 
@@ -775,6 +778,7 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 		WorktreePath:  p.rp.AbsPath,
 		MultiplexerID: p.rp.SessionKey,
 		PoshSessionID: poshID,
+		OwnKeyHolder:  p.OwnKeyHolder,
 	}, nil
 }
 

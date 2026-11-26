@@ -173,7 +173,16 @@ func spawnResultText(driverPrincipal string, res spawn.Result) string {
 	return fmt.Sprintf(
 		"session_key: %s\nworktree_path: %s\nmultiplexer_id: %s\nworker will message %s via chat",
 		res.SessionKey, res.WorktreePath, res.MultiplexerID, driverPrincipal,
-	)
+	) + keyHolderSpawnLine(res.OwnKeyHolder, res.SessionKey)
+}
+
+// keyHolderSpawnLine is the one extra line a spawn prints for a worker with its
+// own key holder; with none it adds nothing, so the output is as it was.
+func keyHolderSpawnLine(own bool, sessionKey string) string {
+	if !own {
+		return ""
+	}
+	return fmt.Sprintf("\nkey_holder: own (see its key: sc session-key %s)", sessionKey)
 }
 
 // runSpawnCLI is the `sc spawn` RunCLI handler.
