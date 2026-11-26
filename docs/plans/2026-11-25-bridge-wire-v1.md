@@ -138,14 +138,20 @@ value from the request.
 | `whoami` | Answers for the session the listener was created for, whatever the request names (see "Identity" below). Refused only when that session has no usable record. |
 | `list-handles` | Plain listing is allowed. With `accept` (or arguments that do not parse): `refused: list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)` |
 | `restart-this-session` | Allowed on the session itself. Without the trusted hand-off: `refused: restart-this-session needs the trusted [session-entry].restart hand-off; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
-| `cancel-restart` | With no `child`, cancels this session's own queued restart: allowed. Naming a child: `refused: cancel-restart naming another session needs the right "restart" on that session, which a session inside its unit may not use whatever it holds; a holder with the right, or the operator, runs `sc cancel-restart --child <session>` at a terminal outside the unit (cancel-restart with no child cancels this session's own)` |
+| `cancel-restart` | With no `child`, cancels a restart this session queued itself: allowed. A restart the operator or a holder queued is not the session's to undo: `refused: cancel-restart cannot cancel this restart: it was queued by <the operator, another principal that holds this session, or a requester the record does not name>, not by this session, and a session inside its unit may cancel only a restart it queued itself; the one who queued it, or the operator, runs `sc cancel-restart --child <session>` at a terminal outside the unit`; the request stays in place. Naming a child: `refused: cancel-restart naming another session needs the right "restart" on that session, which a session inside its unit may not use whatever it holds; a holder with the right, or the operator, runs `sc cancel-restart --child <session>` at a terminal outside the unit (cancel-restart with no child cancels this session's own)` |
 | `close-this-session` | Allowed on the session itself. Without the trusted setting: `refused: close-this-session needs the trusted [permissions].allow-self-close = true; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
 
 The always-ask floor (`perms.AlwaysAsk`) lives only in the hook that runs inside
 the unit, so a forced or widening act never rests on it over the bridge. The
-verbs refuse the escalation arguments themselves, whatever their value:
+verbs refuse the escalation arguments themselves, whatever their value. The
+same refusal holds on the OLDER route into the unit: clown binds the serve socket
+and relays a loopback port to it, a call there carries no origin, and a process
+in the unit that speaks MCP to that port skips the in-unit hook. The verb asks
+whether the caller classifies as confined on ANY transport (the bridge, or a
+serve whose principal a unit record names), not whether the call is bridged;
+an unconfined caller is unchanged and still meets the always-ask floor:
 
-| Verb and argument | Over the bridge |
+| Verb and argument | Over the bridge (and for any confined caller) |
 | --- | --- |
 | `restart-this-session` with `force`, `fresh_env` or any `posture` (`keep` included) | `refused: restart-this-session with force, fresh_env or posture is not available to a session inside its unit; a holder with the right "restart" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force, --fresh-env or --posture (--force is always asked of the human)`. Nothing is recorded and no hand-off runs. |
 | `close-this-session` with `force` (any value) | `refused: close-this-session takes no force argument and never discards work; the operator at a terminal outside the unit discards work with `sc close --force <session>`` |
