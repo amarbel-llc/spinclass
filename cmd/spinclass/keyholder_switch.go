@@ -23,9 +23,75 @@ type keyholderSwitch struct {
 	// Untrusted are the repo- or worktree-level files of the TARGET that set a
 	// [keyholder] key and were ignored.
 	Untrusted []string
+	// File is what the deploy-free switch file under the account's home says (#519):
+	// empty when the file is absent, else on, off or default. FilePath is where it
+	// lives. They are zero on a host that never used the file.
+	File     sweatfileio.KeyholderSwitchValue
+	FilePath string
 }
 
-// resolveKeyholderSwitch reads the switch the way the two sibling switches are
+// Source says where the effective mode came from: the switch file when it said
+// on or off, a sweatfile layer when a layer turned the key holder on, else none.
+func (s keyholderSwitch) Source() string {
+	switch {
+	case s.File == sweatfileio.KeyholderSwitchOn || s.File == sweatfileio.KeyholderSwitchOff:
+		return "switch file"
+	case s.On:
+		return "layer"
+	}
+	return "none"
+}
+
+// resolveKeyholderSwitch is the one place every launch site, `sc validate`,
+// `sc host-load` and `sc keyholder-switch` read the key holder switch: the
+// sweatfile layers (resolveKeyholderLayersAndPasswd) and then the deploy-free
+// switch file under the account's home (applyKeyholderSwitchFile). With the
+// file absent it is exactly what the layers say.
+func resolveKeyholderSwitch(home, repoPath string) (keyholderSwitch, error) {
+	sw, err := resolveKeyholderLayersAndPasswd(home, repoPath)
+	if err != nil {
+		return sw, err
+	}
+	if err := applyKeyholderSwitchFile(&sw); err != nil {
+		return sw, err
+	}
+	return sw, nil
+}
+
+// applyKeyholderSwitchFile lays the switch file over the layers' answer, for NEW
+// launches (a running pair is never touched). off is the kill switch and beats
+// every layer; on turns the key holder on, and refuses when no trusted layer
+// supplies fibby and piggy; default, or no file, leaves the layers to decide. The
+// file is read at the account database's home, never at a home the caller's
+// environment names. An unreadable or invalid file refuses (the error names the
+// path and the way out). An account database that cannot answer says nothing
+// here: the layers' own reading of it has already failed or warned.
+func applyKeyholderSwitchFile(sw *keyholderSwitch) error {
+	pw, err := keyholderPasswdHomeFn()
+	if err != nil || pw == "" {
+		return nil
+	}
+	v, present, err := sweatfileio.ReadKeyholderSwitch(pw)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return nil
+	}
+	sw.File, sw.FilePath = v, sweatfileio.KeyholderSwitchPath(pw)
+	switch v {
+	case sweatfileio.KeyholderSwitchOff:
+		sw.On = false
+	case sweatfileio.KeyholderSwitchOn:
+		if sw.Fibby == "" || sw.Piggy == "" {
+			return fmt.Errorf("the key holder switch file %s says on, but no trusted [keyholder] layer sets fibby and piggy (the host's configuration writes them): launches are refused until it does; run `sc keyholder-switch default` or `sc keyholder-switch off` at a terminal to stop that", sw.FilePath)
+		}
+		sw.On = true
+	}
+	return nil
+}
+
+// resolveKeyholderLayersAndPasswd reads the switch the way the two sibling switches are
 // read ([profile-rights] enforce, [confinement]; spawn.go "the target repo path
 // is caller-chosen, so its hierarchy alone cannot decide the switch"): the TARGET
 // repo's hierarchy AND the DRIVER's own context, and the key holder is ON when
@@ -53,7 +119,7 @@ type keyholderSwitch struct {
 // parse or validate, and the target repo's own hierarchy not loading all refuse:
 // an unloadable file may be the one that switches the key holder on, and only an
 // ABSENT layer is "never on".
-func resolveKeyholderSwitch(home, repoPath string) (keyholderSwitch, error) {
+func resolveKeyholderLayersAndPasswd(home, repoPath string) (keyholderSwitch, error) {
 	var soft []error
 	sw, err := resolveKeyholderLayers(home, repoPath)
 	if err != nil {

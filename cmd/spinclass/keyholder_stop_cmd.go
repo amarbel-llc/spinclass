@@ -55,6 +55,12 @@ type keyholderJournalRecord struct {
 	Session string    `json:"session,omitempty"`
 	Result  string    `json:"result"`
 	Error   string    `json:"error,omitempty"`
+	// Old, New, Uid and Tty record a `sc keyholder-switch` change: the switch
+	// file's word before and after, and who made it. Empty for a stop.
+	Old string `json:"old,omitempty"`
+	New string `json:"new,omitempty"`
+	Uid int    `json:"uid,omitempty"`
+	Tty string `json:"tty,omitempty"`
 }
 
 func appendKeyholderJournal(rec keyholderJournalRecord) error {

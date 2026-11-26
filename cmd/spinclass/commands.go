@@ -80,6 +80,7 @@ func buildApp() *command.App {
 	registerSessionKeyCommand(app)
 	registerKeyholderPairCommand(app)
 	registerKeyholderStopCommand(app)
+	registerKeyholderSwitchCommand(app)
 	registerVersionCommand(app)
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)

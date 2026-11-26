@@ -15,6 +15,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/0/tap"
+	"code.linenisgreat.com/spinclass/internal/0/trustedhome"
 	"code.linenisgreat.com/spinclass/internal/alfa/hostqueue"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
@@ -971,6 +972,37 @@ func CheckKeyholder(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// KeyholderSwitchFile reads the deploy-free switch file under the account's home
+// (the passwd home, never the caller's $HOME: internal/0/trustedhome). It is a
+// variable so a test can aim it. A passwd home that cannot be resolved reports
+// the file as absent: the launch paths treat that failure on their own terms.
+var KeyholderSwitchFile = func() (v sweatfileio.KeyholderSwitchValue, path string, present bool, err error) {
+	pw, herr := trustedhome.Home()
+	if herr != nil || pw == "" {
+		return sweatfileio.KeyholderSwitchDefault, "", false, nil
+	}
+	v, present, err = sweatfileio.ReadKeyholderSwitch(pw)
+	return v, sweatfileio.KeyholderSwitchPath(pw), present, err
+}
+
+// keyholderEffectivelyOn lays the switch file over the layers' answer (off beats a
+// layer's on, on turns it on, default and no file leave it), for the notes that
+// only matter while the key holder is on. A file that cannot be read says
+// nothing here: CheckKeyholderEffective reports it as an error.
+func keyholderEffectivelyOn(layerOn bool) bool {
+	v, _, present, err := KeyholderSwitchFile()
+	if err != nil || !present {
+		return layerOn
+	}
+	switch v {
+	case sweatfileio.KeyholderSwitchOff:
+		return false
+	case sweatfileio.KeyholderSwitchOn:
+		return true
+	}
+	return layerOn
+}
+
 // KeyholderSessionNotes lists the live sessions that have no holder while the
 // switch is on (A-M2): one "<session>: holder: none, operator agent ..." entry
 // each. The command package sets it, because the answer needs session records;
@@ -989,10 +1021,26 @@ func CheckKeyholderEffective(h sweatfile.Hierarchy, home, repoRoot string) []Iss
 	if err != nil {
 		return []Issue{{Message: err.Error(), Severity: SeverityError, Field: "keyholder.mode"}}
 	}
-	if !on {
-		return []Issue{{Message: "key holder: off (no layer above the repo sets [keyholder] mode = \"on\"; sessions run on the operator's agent)", Severity: SeverityWarning, Field: "keyholder"}}
+	source := "layer"
+	// The deploy-free switch file (#519) lays over the layers: off is the kill
+	// switch and beats a layer's on; on turns it on (the programs below still have
+	// to come from a layer). An unreadable or invalid file refuses launches.
+	fv, fpath, present, ferr := KeyholderSwitchFile()
+	if ferr != nil {
+		return []Issue{{Message: ferr.Error(), Severity: SeverityError, Field: "keyholder.switch-file"}}
 	}
-	issues := []Issue{{Message: "key holder: on (a launch of a session spinclass starts needs both fibby and piggy below)", Severity: SeverityWarning, Field: "keyholder"}}
+	if present {
+		switch fv {
+		case sweatfileio.KeyholderSwitchOff:
+			return []Issue{{Message: fmt.Sprintf("key holder: off (source: switch file %s says off: it beats every layer for new launches; running pairs are untouched, `sc keyholder-stop --all` stops them)", fpath), Severity: SeverityWarning, Field: "keyholder"}}
+		case sweatfileio.KeyholderSwitchOn:
+			on, source = true, "switch file"
+		}
+	}
+	if !on {
+		return []Issue{{Message: "key holder: off (source: none; no layer above the repo sets [keyholder] mode = \"on\"; sessions run on the operator's agent)", Severity: SeverityWarning, Field: "keyholder"}}
+	}
+	issues := []Issue{{Message: fmt.Sprintf("key holder: on (source: %s; a launch of a session spinclass starts needs both fibby and piggy below)", source), Severity: SeverityWarning, Field: "keyholder"}}
 	fibby, piggy, _ := sweatfileio.TrustedKeyholderTools(h, home, repoRoot)
 	for _, p := range []struct{ name, path string }{{"fibby", fibby}, {"piggy", piggy}} {
 		if err := sweatfileio.CheckKeyholderToolPath(p.name, p.path); err != nil {
@@ -1794,7 +1842,7 @@ func Run(w io.Writer, home, repoDir string) int {
 	}
 	// With the switch on, the workers that run without a holder are listed: turning
 	// the switch on starts nothing for a session that already runs.
-	if on, _, err := sweatfileio.TrustedKeyholderMode(result, home, mainRoot); err == nil && on {
+	if on, _, err := sweatfileio.TrustedKeyholderMode(result, home, mainRoot); err == nil && keyholderEffectivelyOn(on) {
 		for _, n := range KeyholderSessionNotes() {
 			khSub.Ok("key holder: " + n)
 		}

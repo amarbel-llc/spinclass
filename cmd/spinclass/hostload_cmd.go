@@ -110,6 +110,13 @@ type hostLoadView struct {
 	// It is a fact about binaries: listed whether the key holder switch is on or
 	// off, from any directory, so the operator can check it before switching on.
 	KeyholderStaleServe []QueueBypass `json:"keyholder_stale_serve,omitempty"`
+	// KeyholderMode and KeyholderSource are the effective key holder mode ("on",
+	// "off" or "refused") and where it came from ("switch file", "layer", "none"),
+	// shown only when there is something to say: the key holder is on, a switch
+	// file exists, or a launch would be refused. A host that never used the key
+	// holder renders as before.
+	KeyholderMode   string `json:"keyholder_mode,omitempty"`
+	KeyholderSource string `json:"keyholder_source,omitempty"`
 }
 
 // hostLoadLedger is the ledger host-load reads; a seam for tests.
@@ -196,8 +203,19 @@ func runHostLoad(p hostLoadParams) (string, error) {
 	queue := hostQueueView()
 	bypass := queueBypasses()
 	stale := keyholderStaleServes()
+	eff := describeKeyholderSwitch()
 	if p.Format == "json" {
-		data, err := json.Marshal(hostLoadView{Report: rep, Queue: queue, QueueBypass: bypass, KeyholderStaleServe: stale})
+		view := hostLoadView{Report: rep, Queue: queue, QueueBypass: bypass, KeyholderStaleServe: stale}
+		if eff.worthShowing() {
+			view.KeyholderMode, view.KeyholderSource = "off", eff.Source
+			if eff.On {
+				view.KeyholderMode = "on"
+			}
+			if eff.Err != nil {
+				view.KeyholderMode = "refused"
+			}
+		}
+		data, err := json.Marshal(view)
 		if err != nil {
 			return "", err
 		}
@@ -209,6 +227,9 @@ func runHostLoad(p hostLoadParams) (string, error) {
 	}
 	text += formatQueueBypass(bypass)
 	text += formatKeyholderStaleServes(stale)
+	if eff.worthShowing() {
+		text += "\n" + eff.String()
+	}
 	return text, nil
 }
 
