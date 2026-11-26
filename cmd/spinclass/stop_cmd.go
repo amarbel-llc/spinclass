@@ -41,6 +41,17 @@ func normalizeStopWhen(when string) (string, error) {
 // differs. requester is the principal that asked; principal is st's own. A
 // failed hand-off clears the request again.
 func queueStop(st *session.State, requester, principal, reason, when string) (string, error) {
+	return queueStopAs(st, requester, principal, reason, when, false)
+}
+
+// queueStopAs is queueStop for a caller known to be confined or not, decided by
+// the handler from evidence. A confined caller may not replace a restart or stop
+// another party queued (A-M1), and its reason is cleaned and marked (A-M2): see
+// queueRestartPostureAs.
+func queueStopAs(st *session.State, requester, principal, reason, when string, confinedCaller bool) (string, error) {
+	if confinedCaller {
+		reason = cleanConfinedReason(reason)
+	}
 	if st.StoppedAt != nil {
 		return "", fmt.Errorf("%s is already stopped (since %s, by %s); start it before stopping it again", st.Key(), st.StoppedAt.Format(time.RFC3339), st.StoppedBy)
 	}
@@ -58,11 +69,20 @@ func queueStop(st *session.State, requester, principal, reason, when string) (st
 		When:        when,
 		Kind:        session.RequestKindStop,
 	}
+	var displaced *session.RestartRequest
 	if err := updateLoadedSession(st, func(cur *session.State) bool {
+		if confinedCaller && cur.RestartRequest != nil && cur.RestartRequest.Requester != principal {
+			req := *cur.RestartRequest
+			displaced = &req
+			return false
+		}
 		cur.RestartRequest = request
 		return true
 	}); err != nil {
 		return "", fmt.Errorf("recording the stop request: %w", err)
+	}
+	if displaced != nil {
+		return "", pendingRequestRefusal("stop-this-session", *displaced)
 	}
 	expanded := expandRestartHandoff(argv, principal, st.Key(), when, "", reason)
 	if out, herr := restartHandoffFn(st.WorktreePath, expanded); herr != nil {
@@ -128,6 +148,12 @@ type stopThisSessionParams struct {
 // runStopThisSession is the stop-this-session tool body: a session may stop
 // itself with no right, like restart-this-session.
 func runStopThisSession(p stopThisSessionParams) (string, error) {
+	return runStopThisSessionAs(p, false)
+}
+
+// runStopThisSessionAs is runStopThisSession for a caller the handler classified
+// (the terminal's own form passes false).
+func runStopThisSessionAs(p stopThisSessionParams, confinedCaller bool) (string, error) {
 	principal, st, err := callerSession()
 	if err != nil {
 		return "", err
@@ -140,17 +166,17 @@ func runStopThisSession(p stopThisSessionParams) (string, error) {
 	if reason == "" {
 		reason = defaultSelfStopReason
 	}
-	return queueStop(st, principal, principal, reason, when)
+	return queueStopAs(st, principal, principal, reason, when, confinedCaller)
 }
 
-func handleStopThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleStopThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var p stopThisSessionParams
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	text, err := runStopThisSession(p)
+	text, err := runStopThisSessionAs(p, confinedCall(ctx))
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
