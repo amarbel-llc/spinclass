@@ -1499,8 +1499,8 @@ that can write the operator's home.
 	that certificate says). The certificate is one file, *cert/cert.pub*, in a
 	directory of the session's pair under *$XDG_STATE_HOME/spinclass/keyholder*
 	that the signer writes by rename and a confined unit gets read-only; the
-	session finds it at *$SPINCLASS_KEYHOLDER_CERT*. Any other value is an error
-	and leaves the key holder off.
+	session finds it at *$SPINCLASS_KEYHOLDER_CERT*. Any other value is an error:
+	every launch is refused until it is fixed (*sc validate* names it).
 
 	*Deploy order.* A host takes the key holder in this order, and each step fails
 	closed when skipped: (1) a spinclass that parses *[keyholder]* (without it,
@@ -1639,6 +1639,46 @@ that can write the operator's home.
 	other than the one recorded at the mint, so a key replaced behind the pair's
 	back is never certified unnoticed; the answer is to stop the pair and start it
 	again.
+
+	*Limits.* Between unconfined sessions of one account there is no wall. The
+	fingerprint *sc session-key* checks a key against is a file beside the holder's
+	socket, a live pair is adopted as it stands, and the hidden *sc keyholder-pair*
+	starts and stops pairs, so any unconfined session of the account can replace any
+	session's holder, a confined one's too, and write a record that matches. *sc
+	session-key* says so every time: "vouched only against confined sessions" on
+	stderr, and as the *vouched* field of *--json*. The key is vouched for only
+	against sessions that cannot reach the user manager or the state directory, that
+	is, confined ones. *sc keyholder-pair* start and stop need stdin and stdout on a
+	terminal (the live recipes set *SPINCLASS_KEYHOLDER_PAIR_RECIPE=1*, which any
+	process of the account can set too: it keeps out an accident, not an attacker).
+	A wall between unconfined sessions is a later design item
+	(docs/plans/2026-11-25-key-holder.md, "Stated limits").
+
+	*Sessions that already run.* Turning the switch on starts nothing for them. An
+	unconfined worker launched before it, or without a pair, keeps the operator's
+	agent across a restart, a watchdog relaunch and a re-arm, because they reuse the
+	environment it had. While the switch is on, *sc list*, *session-health* and *sc
+	validate* say "holder: none, operator agent" for each such live worker. A
+	restart does not convert it: resume it (an unconfined session then gets its
+	pair), or close it and spawn a new one; a confined one is refused until it is
+	closed and respawned.
+
+	*The two units.* The holder's unit is bound to fibby's (*BindsTo=*, *After=*),
+	so fibby stopping stops the agent. The other direction is not tied, nothing
+	watches a pair that dies while the session runs, and a running confined unit
+	never sees a replaced pair (its spec binds the socket file, and a replaced pair
+	is a new one); the next resume or restart repairs it.
+
+	*What a worker's jobs inherit.* A worker's merge, check, post-merge and hook
+	jobs run from its frontend, whose *SSH_AUTH_SOCK* is the holder: they are the
+	session's own work, and that is meant. A post-merge target that needs the
+	operator's agent (a deploy, an rsync, anything over ssh) therefore fails AFTER
+	the merge has landed; a worker merges with no targets and the coordinator
+	deploys, or the operator names an exception.
+
+	*Implicit sessions: no holder in this build.* An agent the operator starts
+	himself in a main checkout is not given a holder and keeps his agent (see
+	above); the direction for later is in docs/plans/2026-11-25-key-holder.md.
 
 ## [host-queue]
 

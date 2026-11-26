@@ -1,6 +1,6 @@
 # Per-session key holder (plan)
 
-Status: in review (round 1 of 3). The switch is `[keyholder] mode` in a trusted
+Status: in review (round 2 findings fixed; round 3 of 3 next). The switch is `[keyholder] mode` in a trusted
 sweatfile layer, default off; reference text is in `spinclass-sweatfile(5)`.
 This file holds the decisions the manpage points at; it grows as findings close.
 
@@ -14,7 +14,7 @@ forge tokens and signs operator acts with the card-backed agent until that is
 delegated (decision 4 of the operator's five).
 
 A `sc start` or `sc resume` launch is the driver's only when all three hold
-(`cmd/spinclass/keyholder_driver.go:47-58`, the one classification point):
+(`cmd/spinclass/keyholder_driver.go:48-59`, the one classification point):
 
 1. the session's record names no spawner (a spawn writes it; a session cannot);
 2. neither `CLOWN_SESSION_ID` nor `SPINCLASS_SESSION_ID` is in the environment
@@ -28,24 +28,25 @@ spawner even when the operator resumes it at his terminal, and a session started
 again by the start hand-off (see 'Start hand-offs').
 
 The call sites are `sc start` (`cmd/spinclass/commands_session.go:607`, passes
-`spawned=false`) and `sc resume` (`:867`, passes whether the record names a
+`spawned=false`) and `sc resume` (`:878`, passes whether the record names a
 spawner); `TestStartAndResumeReportTheirLaunchKindToTheKeyHolder` pins both. The
 classification (`classifyKeyholderLaunch`) and the decision "this kind gets a
-pair / its environment is rewritten" (`keyholderPolicyFor`, `:73`) are separate on
+pair / its environment is rewritten" (`keyholderPolicyFor`,
+`keyholder_driver.go:137`) are separate on
 purpose.
 
 ### Why a session that fakes a terminal gains nothing
 
 - UNCONFINED session: a process that unsets the two markers, allocates a pty and
   runs `sc start` makes a session that inherits that process's OWN environment
-  (`keyholder_driver.go:42-46`), which is already the holder's or none. And an
+  (`keyholder_driver.go:43-47`), which is already the holder's or none. And an
   unconfined session already reaches the operator's agent by path: the socket
   files sit in his home and runtime directory, same uid. The holder for an
   unconfined session is delegation hygiene, NOT a boundary; there is nothing to
   gain by posing as a driver that it could not do directly.
 - CONFINED session: it cannot reach `sc start` outside its unit. Inside the unit
   `sc start` would run in the unit's own namespace with the unit's environment,
-  whose only agent socket is the holder's (`internal/foxtrot/spawn/confine.go:304-316`,
+  whose only agent socket is the holder's (`internal/foxtrot/spawn/confine.go:311-325`,
   the spec binds the holder and nothing of the operator's); whatever it starts
   stays in the unit. Starting a process outside the unit would need the user
   manager, which clown's reviewers read as unreachable from a unit (private
@@ -113,14 +114,17 @@ holder socket keeps its own purpose, `key-holder`, because a changed agent is a
 changed boundary and a new session is the honest answer.)
 
 The check runs at every relaunch of a confined session from a stored spec:
-(1) `sc resume` (`relaunchBoundaryNow` in `cmd/spinclass/commands_session.go`),
-before the pair is started; (2) the restart preflight and its `--rearm`
-(`relaunchBoundaryBeforeRestartFn` in `cmd/spinclass/restart_cmd.go`), before the
-pair check, which is shared by `restart-this-session`, `restart-child-session`,
-`sc restart` and restart-hung-child, because clown relaunches without `sc resume`;
-(3) the start hand-off (next section). A respawn's `stickyAgentSocket`
-(`internal/foxtrot/spawn/confine.go:469`) still reads an earlier spec for the
-switch-off builder only. Clown's own restart in place that never goes through the
+(1) `sc resume` (`relaunchBoundaryNow`, defined at
+`cmd/spinclass/keyholder_boundary.go:61`, called at
+`cmd/spinclass/commands_session.go:874`), before the pair is started; (2) the
+restart preflight and its `--rearm` (`relaunchBoundaryBeforeRestartFn`, defined at
+`keyholder_boundary.go:84`, called at `cmd/spinclass/restart_cmd.go:681` and
+`:919`), before the pair check, which is shared by `restart-this-session`,
+`restart-child-session`, `sc restart` and restart-hung-child, because clown
+relaunches without `sc resume`; (3) the start hand-off (next section;
+`checkRelaunchBoundary` at `cmd/spinclass/keyholder_handoff.go:60`). A respawn's
+`stickyAgentSocket` (`internal/foxtrot/spawn/confine.go:504-523`, used at `:573`)
+still reads an earlier spec for the switch-off builder only. Clown's own restart in place that never goes through the
 preflight is NOT covered here, and clown does not cover it either: it re-reads the
 unchanged spec, its digest matches the recorded one, and the session relaunches with
 its OLD boundary (the old agent). That is known behaviour, not a refusal.
@@ -222,8 +226,10 @@ cannot write.
 - **`sc session-key SESSION`** prints exactly two lines on stdout: the key line as
   the holder lists it (type, key, the holder's own comment) and its SHA256
   fingerprint. `--json`: `{session, public_key, fingerprint, cert_path,
-  cert_expires, cert_matches_key, cert_problem}`; `session` is the canonical
-  `<repo>/<branch>` key whatever form was passed. A real capture of both forms is
+  cert_expires, cert_matches_key, cert_problem, vouched}`; `session` is the
+  canonical `<repo>/<branch>` key whatever form was passed, and `vouched` is the
+  stated limit below (the golden has eight fields since round 2; text mode prints
+  the same sentence on stderr, and stdout stays the two lines). A real capture of both forms is
   in `cmd/spinclass/testdata/session-key.{txt,json}.golden`
   (`just debug-session-key-capture` regenerates them from a real pair); a test
   pins the field set and that the command still writes them byte for byte.
@@ -255,6 +261,20 @@ cannot write.
   file with no pair and no directory is found by `sc keyholder-stop --all` and
   removed by it and by `sc clean` unless a process holds the lock (a try-lock:
   the sweep never waits). Stopping a pair, and switching off, leave no file.
+  A `<hash>.kind` record left with no pair, no directory, no lock and no key
+  history (a session removed by something other than `sc close`) is swept the
+  same way; the kind record of a LIVE session is kept (a driver has no pair, and
+  its kind file is the one trace of it), and a kind record beside a key history
+  is a stopped session's, kept on purpose.
+  **Evidence for the lock.** `TestAStopRacingAStartLeavesAWholePairOrNone` is NOT
+  evidence that the lock works: it passes with the flock taken out (checked by
+  mutation, with the fake runner slowed to widen the window), because with the
+  fakes Stop and Start leave a consistent result in either order. It stays as a
+  check that nothing half-removed is left behind. The evidence is
+  `TestAStopRacingAStartAcrossTheLockUnlinkNeverLetsTwoHoldersIn` (200 rounds, a
+  real flock; red when the same-inode check is dropped) and
+  `TestConcurrentStartsOfOneSessionMakeOnePairAndMintOnce` (red when the lock is
+  made shared).
 - **Switching `mode` off** starts nothing and leaves nothing for NEW sessions.
   The pairs of existing sessions run until their session closes; `sc close`
   stops a pair whatever the switch says. A confined session spawned with a holder
@@ -314,6 +334,68 @@ cannot write.
   `sc keyholder-stop --all` stops it only with `--including-unowned`, after
   listing it (journalled `stop-unowned`). A hand-removed directory AND history
   AND lock leave the units "not mine" too: `--including-unowned` is the way out.
+
+## Stated limits, and what is visible (A-H1, A-M2, B-M2, B-M6, B-M7)
+
+These are limits of this build, said plainly; none is a pretend fix.
+
+- **A-H1: between unconfined sessions of one account there is no wall.** The
+  fingerprint `sc session-key` checks the socket against is a file
+  (`record.json`, `<hash>.last.json`) beside the holder's socket; `Start` adopts a
+  live pair as it stands; `sc keyholder-pair` starts and stops pairs. Any
+  unconfined session of the account can replace ANY session's holder, confined or
+  not, and write a record that matches, so the key `sc session-key` prints is
+  vouched for only against CONFINED sessions (which cannot reach the user manager
+  or the state directory: seen in clown's code by the reviewers, not run by me).
+  The operator certifies a key, so this matters at the moment he does: say so
+  where he reads it. `sc session-key` prints "vouched only against confined
+  sessions: an unconfined session of this account could have written this record"
+  on stderr in text mode and as the `vouched` field of `--json`. `sc keyholder-pair
+  start|stop` now needs stdin and stdout on a terminal, or the variable
+  `SPINCLASS_KEYHOLDER_PAIR_RECIPE=1` the live recipes set (status only reads).
+  The variable is NOT a boundary: any process of the account can set it. It keeps
+  the plain call, a driven script and an accident out; the wall is the Sunday item.
+  *For Sunday: where a record a session cannot write could live.* (1) The user
+  manager's own unit properties, set at start (`systemd-run --property=` a
+  description or an environment carrying the minted fingerprint, read back with
+  `systemctl --user show`): a same-uid session can still `systemctl --user stop`
+  and start units, so this stops only the quiet edit, not the replacement; (2) a
+  record in a root-owned directory written by a small helper, or signed by the
+  operator's card at the moment he certifies (the card then vouches for the key it
+  signed, which is what the certificate already is); (3) the real fix is the
+  per-session identity epic: sessions of one account in separate users or
+  confined units.
+- **A-M2: switching on does not convert sessions that already run.** An unconfined
+  worker launched before the switch keeps the operator's agent across a restart,
+  a watchdog relaunch and a re-arm: they reuse the environment it had. `sc list`
+  (text, JSON and the table), session-health and `sc validate` now say
+  "holder: none, operator agent ... a restart does not convert it; close and
+  respawn" for every live worker with no pair while the switch is on. Only a
+  resume of an unconfined session, or a close and a new spawn, puts it on its own
+  key; a confined session is refused on resume until it is closed and respawned
+  (above).
+- **B-M2: the two units are tied one way.** The holder's unit starts with
+  `BindsTo=` and `After=` fibby's, so fibby going away stops the agent and the
+  half-dead state (an agent that still lists the key but can no longer sign)
+  cannot exist; the live pair recipe stops fibby alone and asserts the agent unit
+  goes with it. NOT done, for Sunday: the agent dying does not stop fibby (the
+  next start tears the pair down whole); nothing watches a pair that dies while
+  the session runs (a heartbeat or an `ExecStopPost` that wakes), and a RUNNING
+  confined unit never sees a replaced pair, because the spec binds the agent
+  socket FILE and a replaced pair is a new inode the old bind does not show (the
+  certificate has the directory-bind answer; the socket does not yet).
+- **B-M6: a worker's jobs inherit the holder socket.** The merge, check,
+  post-merge and hook jobs of a worker run from its frontend, whose
+  `SSH_AUTH_SOCK` is the holder once the switch is on; nothing in the hook runner
+  or the job runner handles it. That is correct for this build (they are the
+  session's own work and the holder is its identity), with this consequence: a
+  worker's `merge-this-session` whose post-merge target needs the operator's agent
+  (a deploy, an rsync, anything over ssh to a host) fails AFTER the merge has
+  landed. Either a worker merges with `targets=[]` and the coordinator deploys, or
+  the operator names an exception; nothing here chooses for him.
+- **B-M7: implicit sessions: no holder in this build** (operator ruling: this
+  build keeps rule A; implicit sessions get holders on Sunday). See "Not given a
+  holder in this build" above and "Later".
 
 ## Deploy order, and what breaks if it is violated (B-M5, B-M4)
 
