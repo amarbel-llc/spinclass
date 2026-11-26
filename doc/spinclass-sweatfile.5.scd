@@ -1499,11 +1499,10 @@ needs one.
   the worktree and branch it made (it runs no nix gc for them). When they hold
   work, git cannot answer about them, or the removal fails, it keeps them and
   prints the *sc close* command that removes them; when the removal failed, it
-  prints *sc keyholder-stop SESSION* too.
-
-  With the key holder on, *sc validate* therefore fails (a non-zero exit) on a
-  host with no systemd user manager and with a build that has no built-in tool
-  paths, such as a sandbox, a CI job or a plain *go build*.
+  prints *sc keyholder-stop SESSION* too. So with the key holder on,
+  *sc validate* fails (a non-zero exit) on a host with no systemd user manager
+  and with a build that has no built-in tool paths, such as a sandbox, a CI job
+  or a plain *go build*.
 - *sc keyholder-selftest* starts a real pair for a throwaway key with the
   trusted *fibby* and *piggy* (or *--fibby* and *--piggy*), whether or not the
   mode is on, checks that the holder lists exactly its one key, makes and
