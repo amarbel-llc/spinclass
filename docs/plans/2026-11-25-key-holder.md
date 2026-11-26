@@ -428,9 +428,16 @@ done out of order; every one fails closed and none exposes the operator's agent.
 2. **Clown f502df21 or later** is the host's clown. Its spec validation lets a
    confined spec set `SSH_AUTH_SOCK` to a socket it binds (the holder's). An OLDER
    clown refuses every confined spawn with "env key SSH_AUTH_SOCK is scrubbed from
-   the agent scope and may not be set by the spec" (the scrubbed-key branch of
-   clown `internal/alfa/agentscope/spec.go`, seen in the source; I did not run an
-   older clown). That is fail closed and loud, but the text does not point at the
+   the agent scope and may not be set by the spec". SEEN, in the PARENT of that
+   commit (`git diff f502df21ae7d^..f502df21ae7d -- internal/alfa/agentscope/`,
+   read in the clown checkout): `spec.go` already held the scrubbed-key branch
+   (`if scrubbedKeys[k] { return fmt.Errorf("env key %q is scrubbed from the agent
+   scope and may not be set by the spec", k) }`, at about lines 156-158 of the
+   parent, counted from the hunk header) and `SSH_AUTH_SOCK` was already in
+   `scrubbedKeys` (`unit.go`, outside the commit's one hunk, which only changed a
+   comment there); f502df21 added only the exception. An older clown therefore
+   refuses the spec by that branch. I did not RUN an older clown. That is fail
+   closed and loud, but the text does not point at the
    key holder. **There is no way for spinclass to detect it ahead of time:**
    `clown agent-scope-capabilities` lists `agent-unit`, `private-network`,
    `frontend-mcp-sockets` and the like, and carries no marker for this rule, and
@@ -445,7 +452,19 @@ done out of order; every one fails closed and none exposes the operator's agent.
    this step is also a requirement, not a check.
 4. **Circus's `[keyholder]` configuration** (`mode = "off"`, `fibby`, `piggy`) is
    deployed. With the mode off nothing starts and nothing is validated beyond parse.
-5. **The operator switches `mode` on** (his act). Before this, a launch with the
+5. **Every long-running session is restarted after the bump, BEFORE the switch**
+   (restart it, or close it and spawn a new one). A running `spinclass serve`
+   keeps the binary it started with, and an old serve spawns workers on the OLD
+   path: no pair, the operator's agent, and it ignores `[keyholder]` silently (an
+   unknown table fails only `sc validate`). The new binary cannot reach into it.
+   Detection: `sc host-load` (text and `--format json`) lists, while the switch is
+   on, every live serve whose binary lacks the key holder's build marker
+   (`keyholder.BuildMarker`) under "KEY HOLDER STALE SERVE" (field
+   `keyholder_stale_serve`), by the same scan as the host queue's QUEUE BYPASS
+   (`cmd/spinclass/hostload_keyholder_stale.go`); and `sc list` flags a worker that
+   has no pair ("holder: none, operator agent"). The listing is a check, the
+   restart is the step: with the switch off it says nothing.
+6. **The operator switches `mode` on** (his act). Before this, a launch with the
    mode on and the paths unset is refused naming the setting.
 
 A host's builds also matter: `.#spinclass-native` carries none of the tool pins and

@@ -106,6 +106,9 @@ type hostLoadView struct {
 	Queue *hostqueue.View `json:"queue,omitempty"`
 	// QueueBypass lists live serves whose binary has no host-queue code.
 	QueueBypass []QueueBypass `json:"queue_bypass,omitempty"`
+	// KeyholderStaleServe lists live serves whose binary predates the key holder
+	// (only while the key holder switch is on).
+	KeyholderStaleServe []QueueBypass `json:"keyholder_stale_serve,omitempty"`
 }
 
 // hostLoadLedger is the ledger host-load reads; a seam for tests.
@@ -191,8 +194,9 @@ func runHostLoad(p hostLoadParams) (string, error) {
 	}
 	queue := hostQueueView()
 	bypass := queueBypasses()
+	stale := keyholderStaleServes()
 	if p.Format == "json" {
-		data, err := json.Marshal(hostLoadView{Report: rep, Queue: queue, QueueBypass: bypass})
+		data, err := json.Marshal(hostLoadView{Report: rep, Queue: queue, QueueBypass: bypass, KeyholderStaleServe: stale})
 		if err != nil {
 			return "", err
 		}
@@ -203,6 +207,7 @@ func runHostLoad(p hostLoadParams) (string, error) {
 		text += formatHostQueue(queue, time.Now())
 	}
 	text += formatQueueBypass(bypass)
+	text += formatKeyholderStaleServes(stale)
 	return text, nil
 }
 

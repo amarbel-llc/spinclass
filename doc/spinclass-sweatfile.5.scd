@@ -1524,7 +1524,14 @@ that can write the operator's home.
 	units; without a user manager that outlives logins every key is lost at the
 	last logout and announced at the next resume; a launch with no user manager at
 	all is refused naming lingering); (4) the host's *[keyholder]* configuration
-	with *mode = "off"*; (5) the operator sets *mode = "on"*.
+	with *mode = "off"*; (5) every long-running session is restarted, or closed and
+	respawned, so that no *spinclass serve* older than the key holder is left (a
+	running serve keeps the binary it started with and spawns workers on the
+	operator's agent, ignoring *[keyholder]*; *sc host-load* lists such serves under
+	KEY HOLDER STALE SERVE while the switch is on); (6) the operator sets
+	*mode = "on"*. Clown's refusal text for step 2 was read in the parent of
+	f502df21 (its spec check already refused *SSH_AUTH_SOCK* as a scrubbed key); an
+	older clown was not run.
 
 *fibby*, *piggy*
 	The absolute store paths of the two programs the pair runs, for example

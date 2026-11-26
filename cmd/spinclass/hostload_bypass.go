@@ -87,12 +87,18 @@ func isServeCommand(args []string) bool {
 // binaryHasQueue reports whether the file at path contains the host-queue wait
 // text, reading it in chunks.
 func binaryHasQueue(path string) (bool, error) {
+	return binaryHasMarker(path, hostqueue.AdmissionMarker)
+}
+
+// binaryHasMarker reports whether the file at path contains marker, reading it
+// in chunks.
+func binaryHasMarker(path, marker string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return false, err
 	}
 	defer f.Close()
-	needle := []byte(hostqueue.AdmissionMarker)
+	needle := []byte(marker)
 	buf := make([]byte, 1<<20)
 	var carry []byte
 	for {
@@ -117,14 +123,17 @@ func binaryHasQueue(path string) (bool, error) {
 // queueBypasses lists the live serves whose binary lacks the host-queue code.
 // A binary that cannot be read is not reported (nothing is known about it). One
 // read per distinct executable path.
-func queueBypasses() []QueueBypass {
+func queueBypasses() []QueueBypass { return serveBypasses(hostqueue.AdmissionMarker) }
+
+// serveBypasses lists the live serves whose binary lacks marker.
+func serveBypasses(marker string) []QueueBypass {
 	verdict := map[string]bool{}
 	var out []QueueBypass
 	for _, p := range liveServeProcesses() {
 		has, seen := verdict[p.exe]
 		if !seen {
 			var err error
-			has, err = binaryHasQueue(p.binary)
+			has, err = binaryHasMarker(p.binary, marker)
 			if err != nil {
 				continue
 			}
