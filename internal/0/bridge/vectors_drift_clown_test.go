@@ -1,5 +1,3 @@
-//go:build clownvectors
-
 package bridge
 
 import (
@@ -8,17 +6,15 @@ import (
 	"os"
 	"testing"
 
-	"code.linenisgreat.com/clown/pkgs/bridgewire"
+	"code.linenisgreat.com/clown/pkgs/bridgevectors"
 	"code.linenisgreat.com/clown/pkgs/peercheck"
 )
 
 // The single home of the bridge's conformance vectors is this package's
 // testdata. Clown vendors both files and records the sha256 it vendored as
-// exported constants (bridgewire.VectorsSHA256, peercheck.AdmissionVectorsSHA256,
-// clown rev ed73ff6 or later). A vector change published here without a
-// re-vendor in clown fails this test. Off by default (build tag clownvectors)
-// until the locked clown carries the constants; see the issue "bridge: clown
-// lock bump checklist".
+// exported constants (bridgevectors.SHA256, peercheck.AdmissionVectorsSHA256).
+// A vector change published here without a re-vendor in clown fails this test,
+// so the two repositories cannot drift apart silently.
 
 func fileSHA256(t *testing.T, path string) string {
 	t.Helper()
@@ -34,7 +30,7 @@ func TestVectorsDriftAgainstTheLockedClown(t *testing.T) {
 	for _, c := range []struct {
 		name, path, clown string
 	}{
-		{"vectors.json", "testdata/vectors.json", bridgewire.VectorsSHA256},
+		{"vectors.json", "testdata/vectors.json", bridgevectors.SHA256},
 		{"admission-vectors.json", "testdata/admission-vectors.json", peercheck.AdmissionVectorsSHA256},
 	} {
 		if got := fileSHA256(t, c.path); got != c.clown {
