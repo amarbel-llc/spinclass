@@ -222,6 +222,14 @@ func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions)
 	if err != nil {
 		return err
 	}
+	if f.LockOnly || f.KindOnly {
+		// Found said there was no directory; a launch may have made one since. Look
+		// again under the lock: a start that raced this sweep owns what it made.
+		if _, serr := os.Lstat(filepath.Join(l.Base, f.Hash)); serr == nil {
+			h.Unlock()
+			return nil
+		}
+	}
 	if err := l.teardown(ctx, l.layoutForHash(f.Hash)); err != nil {
 		h.Unlock()
 		return err

@@ -15,15 +15,15 @@ import (
 // whether there was a pair to stop. A session that never had one costs a stat.
 var stopKeyholder = func(ctx context.Context, sessionKey string) (bool, error) {
 	base := keyholder.StateBase()
-	// The session's kind record (driver or worker) ends with it, whether or not it
-	// ever had a pair: a driver has none.
-	if err := keyholder.ForgetKind(base, sessionKey); err != nil {
-		return false, err
-	}
-	if _, err := os.Lstat(keyholder.SessionDir(base, sessionKey)); err != nil {
-		return false, nil
-	}
 	l := &keyholder.Launcher{Base: base, Run: keyholder.SystemdRunner{}}
+	if _, err := os.Lstat(keyholder.SessionDir(base, sessionKey)); err != nil {
+		// No pair directory: the operator stopped the pair earlier (the key history
+		// is kept, marked stopped), a start failed, or it is a driver, which never
+		// had one. The session's key history, kind record and lock file end with the
+		// session in EVERY one of those states: a later session with the same key
+		// must not inherit a stale history and be told its first key "replaced" one.
+		return false, l.ForgetSession(ctx, sessionKey)
+	}
 	return true, l.Stop(ctx, sessionKey)
 }
 

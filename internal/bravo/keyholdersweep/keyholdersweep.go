@@ -57,6 +57,13 @@ func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duratio
 			p.Why = "session " + f.Session + " is live"
 		case f.KindOnly && liveHashes[f.Hash]:
 			p.Why = "the kind record of a live session (a driver has no pair)"
+		case liveHashes[f.Hash]:
+			// A session record maps to this hash: whatever is left of its pair (a lock
+			// file, units without a directory, a failed re-mint) the history and kind
+			// record under it are the live session's, and a sweep that ended them would
+			// let the next restart relaunch onto a dead holder socket and the next resume
+			// re-key unannounced. Reported, never swept.
+			p.Why = "a live session maps to this hash: reported, never swept (a failed re-mint? resume or restart the session)"
 		case f.LockOnly:
 			p.Orphan, p.Why = true, "a leftover lock file with no pair (removed unless a process holds it)"
 		case f.KindOnly:
