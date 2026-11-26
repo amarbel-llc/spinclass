@@ -87,7 +87,7 @@ var (
 	// ErrNoPeerCheck is Listen's refusal when no exact peer check was supplied:
 	// the bridge admits a peer only by the exact cgroup of its unit, and a
 	// weaker default would admit its neighbours.
-	ErrNoPeerCheck = errors.New("the bridge needs peercheck.CheckPeerExact from a merged clown; none is wired in this build")
+	ErrNoPeerCheck = errors.New("the bridge needs peercheck.AdmitPeer from a merged clown; none is wired in this build")
 	// ErrNoControl is Push's error when no control stream is open.
 	ErrNoControl = errors.New("bridge: no control stream is open")
 )
@@ -145,6 +145,13 @@ type Options struct {
 	// cgroup the unit's cgroup file names. There is no default: a listener
 	// given neither CheckPeer nor PeerCheck refuses to start (ErrNoPeerCheck).
 	CheckPeer func(conn net.Conn, wantCgroup string) error
+	// Admit is the production verdict (clown's peercheck.AdmitPeer): it reads
+	// the cgroup file itself and then makes the same exact check. It is used
+	// when CheckPeer is nil; a CheckPeer, when given, wins (tests inject fakes
+	// that way). Our own read of the file still runs first, only to refuse a
+	// file that does not name the unit clown exported and to answer "not ready"
+	// while the file is missing; the verdict is Admit's own read.
+	Admit func(conn net.Conn, cgroupFile string) error
 	// CgroupFile is the file clown writes the unit's cgroup path into
 	// (CLOWN_BRIDGE_CGROUP_FILE). It is read on every connection; while it is
 	// missing or invalid every peer is answered ERR refused. It must lie
@@ -236,7 +243,7 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 		return nil, fmt.Errorf("%w: %v", ErrOff, err)
 	}
 	if opts.PeerCheck == nil {
-		if opts.CheckPeer == nil {
+		if opts.CheckPeer == nil && opts.Admit == nil {
 			return nil, ErrNoPeerCheck
 		}
 		if err := checkCgroupFilePath(dir, opts.CgroupFile); err != nil {
@@ -479,7 +486,13 @@ func (s *Server) checkPeer(conn net.Conn) (text string, err error) {
 	if s.unit != "" && !cgroupNamesUnit(cg, s.unit) {
 		return RefusedPeerText, fmt.Errorf("the cgroup file names %s, not the unit %s", cg, s.unit)
 	}
-	if err := s.opts.CheckPeer(conn, cg); err != nil {
+	if s.opts.CheckPeer != nil {
+		if err := s.opts.CheckPeer(conn, cg); err != nil {
+			return RefusedPeerText, err
+		}
+		return "", nil
+	}
+	if err := s.opts.Admit(conn, s.opts.CgroupFile); err != nil {
 		return RefusedPeerText, err
 	}
 	return "", nil

@@ -60,11 +60,14 @@ func withCgroupFile(base func(string) string, file string) func(string) string {
 // [confinement] bridge knob): with the env set the listener starts, without it
 // serve does nothing, and no sweatfile is consulted either way.
 func TestProductionWiringIsClownsExactPeerCheck(t *testing.T) {
-	if bridgeCheckPeer == nil {
+	if bridgeAdmitPeer == nil {
 		t.Fatal("no exact peer check is wired: the bridge can never start")
 	}
-	if got, want := reflect.ValueOf(bridgeCheckPeer).Pointer(), reflect.ValueOf(peercheck.CheckPeerExact).Pointer(); got != want {
-		t.Fatalf("bridgeCheckPeer is not peercheck.CheckPeerExact")
+	if got, want := reflect.ValueOf(bridgeAdmitPeer).Pointer(), reflect.ValueOf(peercheck.AdmitPeer).Pointer(); got != want {
+		t.Fatalf("bridgeAdmitPeer is not peercheck.AdmitPeer")
+	}
+	if bridgeCheckPeer != nil {
+		t.Fatal("the test seam bridgeCheckPeer must be nil in production")
 	}
 	home := t.TempDir()
 	dir := shortBridgeDir(t)

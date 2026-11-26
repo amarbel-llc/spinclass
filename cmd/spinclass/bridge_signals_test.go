@@ -48,19 +48,19 @@ func TestAFailedBridgeStartIsADeadListenerMarkedDownAndWokenOncePerInterval(t *t
 	bridgeResolve = func() bridgePlan { return bridgePlan{Dir: dir, Unit: e2eUnit, CgroupFile: "/x/y"} }
 	t.Cleanup(func() { bridgeResolve = orig })
 	// A start that fails: no peer check wired.
-	origCheck := bridgeCheckPeer
-	bridgeCheckPeer = nil
-	t.Cleanup(func() { bridgeCheckPeer = origCheck })
+	origCheck, origAdmit := bridgeCheckPeer, bridgeAdmitPeer
+	bridgeCheckPeer, bridgeAdmitPeer = nil, nil
+	t.Cleanup(func() { bridgeCheckPeer, bridgeAdmitPeer = origCheck, origAdmit })
 
 	if stop := startBridge(context.Background(), e2eHandlerFactory()); stop != nil {
 		stop()
 		t.Fatal("the bridge started with no exact peer check")
 	}
-	if len(*calls) != 1 || (*calls)[0].target != "spawner" || !strings.Contains((*calls)[0].message, "peercheck.CheckPeerExact") {
+	if len(*calls) != 1 || (*calls)[0].target != "spawner" || !strings.Contains((*calls)[0].message, "peercheck.AdmitPeer") {
 		t.Fatalf("wakes = %+v, want one to the other holder naming the cause", *calls)
 	}
 	st, ok := crossinglog.ReadState(crossinglog.StateDir(stateHome), e2ePrincipal)
-	if !ok || st.Listening || !strings.Contains(st.Reason, "peercheck.CheckPeerExact") || st.Session != sessionTestKey {
+	if !ok || st.Listening || !strings.Contains(st.Reason, "peercheck.AdmitPeer") || st.Session != sessionTestKey {
 		t.Errorf("state file = %+v %v, want down with the named reason", st, ok)
 	}
 	if bridgeStateOut.Load() != nil {

@@ -77,7 +77,7 @@ func TestListenWithoutAnExactPeerCheckRefusesToStart(t *testing.T) {
 	if !errors.Is(err, ErrNoPeerCheck) {
 		t.Errorf("err = %v, want ErrNoPeerCheck", err)
 	}
-	if !strings.Contains(err.Error(), "the bridge needs peercheck.CheckPeerExact from a merged clown; none is wired in this build") {
+	if !strings.Contains(err.Error(), "the bridge needs peercheck.AdmitPeer from a merged clown; none is wired in this build") {
 		t.Errorf("the reason is not the named one: %v", err)
 	}
 	if _, serr := os.Lstat(filepath.Join(dir, bridge.SocketName)); !os.IsNotExist(serr) {

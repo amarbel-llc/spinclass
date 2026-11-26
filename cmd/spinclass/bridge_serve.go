@@ -37,12 +37,18 @@ type bridgePlan struct {
 // bridgeEnvUnsetReason is the reason of a serve clown gave no bridge.
 const bridgeEnvUnsetReason = "CLOWN_BRIDGE_DIR or CLOWN_BRIDGE_UNIT is unset or empty: clown named no bridge for this session"
 
-// bridgeCheckPeer is the exact peer check this build wires into the listener:
-// clown's peercheck.CheckPeerExact(conn, wantCgroup): the peer's cgroup must
-// equal the unit's, strictly (no descendants), and a peer with no pidfd is
-// refused. A nil check keeps the bridge off with a named reason
-// (bridgeserver.ErrNoPeerCheck), never a weaker default; tests swap it.
-var bridgeCheckPeer func(conn net.Conn, wantCgroup string) error = peercheck.CheckPeerExact
+// bridgeAdmitPeer is the exact peer check this build wires into the listener:
+// clown's peercheck.AdmitPeer(conn, cgroupFile) reads the cgroup file and
+// admits the peer only when its cgroup equals the file's value strictly (no
+// descendants); a peer with no pidfd is refused. With neither this nor a test
+// check set the bridge stays off with a named reason
+// (bridgeserver.ErrNoPeerCheck), never a weaker default.
+var bridgeAdmitPeer func(conn net.Conn, cgroupFile string) error = peercheck.AdmitPeer
+
+// bridgeCheckPeer is a test seam: a check on (conn, wantCgroup) that, when set,
+// replaces bridgeAdmitPeer so hermetic tests can decide a connection without a
+// unit. It is nil in production.
+var bridgeCheckPeer func(conn net.Conn, wantCgroup string) error
 
 // resolveBridgePlan turns the environment clown exported into a plan. The ONE
 // operator switch of the bridge is the launch spec's `bridge` field (set from
@@ -159,7 +165,7 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 	}
 	// No exact peer check wired: the listener stays off, loudly. A weaker check
 	// would admit the unit's neighbours, so there is no fallback.
-	if bridgeCheckPeer == nil {
+	if bridgeCheckPeer == nil && bridgeAdmitPeer == nil {
 		return fail(bridgeserver.ErrNoPeerCheck)
 	}
 	// Bind at once. Every bridged call acts on the session this listener
@@ -176,6 +182,7 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 	stopListener := startBridgeFrom(ctx, plan, bridgeserver.Options{
 		SessionKey: key,
 		CheckPeer:  bridgeCheckPeer,
+		Admit:      bridgeAdmitPeer,
 		CgroupFile: plan.CgroupFile,
 		Ready:      bridgeReadiness(key, currentPrincipal(), plan.Unit, serveStart),
 		Handler:    newHandler(log, stats),
