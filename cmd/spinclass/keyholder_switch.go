@@ -64,7 +64,19 @@ func (s keyholderSwitch) Source() string {
 // switch file under the account's home (applyKeyholderSwitchFile). With the
 // file absent it is exactly what the layers say.
 func resolveKeyholderSwitch(home, repoPath string) (keyholderSwitch, error) {
-	sw, err := resolveKeyholderLayersAndPasswd(home, repoPath)
+	return resolveKeyholderSwitchFrom(home, repoPath, keyholderDriverRepoFn(home))
+}
+
+// resolveSessionKeyholderSwitch is the switch for a sentence about a session
+// that already exists: its OWN repo's trusted layers and the switch file, never
+// the caller's directory. A listing run from a directory where the key holder is
+// on must not say it is on for every session on the host.
+func resolveSessionKeyholderSwitch(home, repoPath string) (keyholderSwitch, error) {
+	return resolveKeyholderSwitchFrom(home, repoPath, "")
+}
+
+func resolveKeyholderSwitchFrom(home, repoPath, driver string) (keyholderSwitch, error) {
+	sw, err := resolveKeyholderLayersAndPasswdFrom(home, repoPath, driver)
 	if err != nil {
 		return sw, err
 	}
@@ -140,8 +152,14 @@ func applyKeyholderSwitchFile(sw *keyholderSwitch) error {
 // an unloadable file may be the one that switches the key holder on, and only an
 // ABSENT layer is "never on".
 func resolveKeyholderLayersAndPasswd(home, repoPath string) (keyholderSwitch, error) {
+	return resolveKeyholderLayersAndPasswdFrom(home, repoPath, keyholderDriverRepoFn(home))
+}
+
+// resolveKeyholderLayersAndPasswdFrom is the same with the driver's context
+// named; an empty driver reads none.
+func resolveKeyholderLayersAndPasswdFrom(home, repoPath, driver string) (keyholderSwitch, error) {
 	var soft []error
-	sw, err := resolveKeyholderLayers(home, repoPath)
+	sw, err := resolveKeyholderLayers(home, repoPath, driver)
 	if err != nil {
 		if !isSoftKeyholderErr(err) {
 			return sw, err
@@ -209,7 +227,7 @@ func applyPasswdHomeLayers(sw *keyholderSwitch, home, repoPath string) error {
 	return sw.refuseToolConflict()
 }
 
-func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
+func resolveKeyholderLayers(home, repoPath, driver string) (keyholderSwitch, error) {
 	var sw keyholderSwitch
 	th, err := sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {
@@ -223,7 +241,6 @@ func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
 	tFibby, tPiggy, _ := sweatfileio.TrustedKeyholderTools(th, home, repoPath)
 	sw.On, sw.Fibby, sw.Piggy = tOn, tFibby, tPiggy
 
-	driver := keyholderDriverRepoFn(home)
 	if driver == "" || driver == repoPath {
 		return sw, nil
 	}

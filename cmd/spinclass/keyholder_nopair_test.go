@@ -107,6 +107,37 @@ func TestTheNoPairNoteIsQuietForAClosedAndForAnImplicitSession(t *testing.T) {
 	}
 }
 
+// Each session is judged by ITS OWN repo, never by where the caller stands:
+// run from a tree whose layer says on, a worker under a tree that says nothing
+// is not listed, and one under the on tree still is.
+func TestTheNoPairNoteFollowsTheSessionsOwnRepoNotTheCallersDirectory(t *testing.T) {
+	home, offRepo := khHome(t, "")
+	t.Setenv("HOME", home)
+	onTree := filepath.Join(home, "on-tree")
+	onRepo := filepath.Join(onTree, "repo")
+	if err := os.MkdirAll(onRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(onTree, "sweatfile"), []byte(khModeOn), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev := keyholderDriverRepoFn
+	keyholderDriverRepoFn = func(string) string { return onRepo }
+	t.Cleanup(func() { keyholderDriverRepoFn = prev })
+
+	if got := keyholderNoPairNote(noPairState(t, offRepo, "repo/elsewhere", "repo/driver")); got != "" {
+		t.Errorf("a worker whose own repo has the switch off, seen from an on directory: note %q, want none", got)
+	}
+	if got := keyholderNoPairNote(noPairState(t, onRepo, "repo/inside", "repo/driver")); got != keyholderNoPairText {
+		t.Errorf("a worker whose own repo has the switch on: note %q, want %q", got, keyholderNoPairText)
+	}
+	// A launch still takes the driver's context: only the listing changed.
+	sw, err := resolveKeyholderSwitch(home, offRepo)
+	if err != nil || !sw.On {
+		t.Errorf("a launch from an on directory into an off repo: on=%v err=%v, want on", sw.On, err)
+	}
+}
+
 // The list renderers use the pair's own note first, then this one.
 func TestTheListNoteIsThePairsNoteElseTheNoPairNote(t *testing.T) {
 	home, repo := khHome(t, khModeOn)

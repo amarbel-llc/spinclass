@@ -145,7 +145,7 @@ func keyholderNoPairNote(st *session.State) string {
 	if err != nil {
 		return ""
 	}
-	sw, err := resolveKeyholderSwitch(home, st.RepoPath)
+	sw, err := resolveSessionKeyholderSwitch(home, st.RepoPath)
 	if err != nil || !sw.On {
 		return ""
 	}

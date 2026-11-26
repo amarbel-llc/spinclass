@@ -1859,8 +1859,10 @@ holder against the operator's off cannot be started.
 	*Sessions that already run.* Turning the switch on starts nothing for them. An
 	unconfined worker launched before it, or without a pair, keeps the operator's
 	agent across a restart, a watchdog relaunch and a re-arm, because they reuse the
-	environment it had. While the switch is on, *sc list*, *session-health* and *sc
-	validate* say "holder: none, operator agent" for each such live worker. A
+	environment it had. *sc list*, *session-health* and *sc validate* say "holder:
+	none, operator agent" for each such live worker whose OWN repo has the switch
+	on (its trusted layers and the switch file), whatever directory you run them
+	from; a worker under a tree with the switch off is not mentioned. A
 	restart does not convert it: resume it (an unconfined session then gets its
 	pair), or close it and spawn a new one; a confined one is refused until it is
 	closed and respawned. Tracked: spinclass#517.
