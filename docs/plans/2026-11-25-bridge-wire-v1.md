@@ -31,7 +31,8 @@ cgroup merely ended in the unit's name. A cgroup under the unit, or a different
 unit with a matching tail, would have passed. The check is now strict equality
 against the file clown writes, read on every connection, and the listener has no
 checker of its own: with none wired it refuses to start. Clown's
-`peercheck.CheckPeerExact` is that check.
+`peercheck.AdmitPeer` (it reads the file, then `CheckPeerExact`) is that check
+since the lock moved to clown 5da0c521.
 
 **A directory bind, read-only.** The socket lives in a directory clown binds
 read-only into the unit, and nothing writable may cover it or any directory

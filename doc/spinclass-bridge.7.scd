@@ -349,9 +349,14 @@ The listener admits a connection only when the peer's cgroup (read from its
 pidfd, *SO\_PEERPIDFD*, never from a pid number) is EXACTLY the unit's
 *ControlGroup*: strict equality, no descendant, no prefix, no suffix match
 (empty, */* and a trailing slash are refused, and a peer with no pidfd is
-refused, never admitted by a weaker check). The exact check is clown's
-*pkgs/peercheck.CheckPeerExact*. The listener holds no checker of its own: with
-none wired it refuses to start and says so.
+refused, never admitted by a weaker check). The verdict is clown's
+*pkgs/peercheck.AdmitPeer(conn, cgroupFile)*, which reads the file and then
+makes the exact check (*CheckPeerExact*). The listener holds no checker of its
+own: with none wired it refuses to start and says so. Our own read of the file
+runs first, only to answer "not ready" while the file is missing and to refuse
+a value that does not name the unit clown exported; the verdict is AdmitPeer's
+own read of the file. *pkgs/peercheck.AdmitCgroup* stays in use for the
+admission vectors.
 
 The expected cgroup is read from the file named by *CLOWN\_BRIDGE\_CGROUP\_FILE*,
 on every connection, never cached. The file MUST be a regular file (not a link,
@@ -577,18 +582,26 @@ and a change to the file MUST change the digest and bump this text. The file has
 case: count entries, not test lines). The admission file has 21 cases (see
 ADMISSION). Spinclass runs both through its own reader and admission path
 (*TestVectors*, *TestAdmissionVectors*), and clown vendors both byte for byte.
+Drift between the two repositories fails a gate here: clown records the digests
+it vendored as exported constants (*pkgs/bridgevectors.SHA256*,
+*pkgs/peercheck.AdmissionVectorsSHA256*), and *TestVectorsDriftAgainstTheLockedClown*
+in *internal/0/bridge* compares them with the two files, so publishing new
+vectors without a re-vendor in clown, or locking a clown that vendored other
+ones, is red and says to re-vendor.
 
 # CONFORMANCE
 
 - The vectors above: both implementations pass every case.
-- *just debug-bridge-halves-proof <clown\_bin>*: runs spinclass's real *serve*
-  listener against clown's real shim in a real transient unit, both start orders
+- *just debug-bridge-halves-proof <clown\_bin> <seam\_bin>*: runs spinclass's real
+  *serve* listener against clown's real shim in a real transient unit, both start orders
   (serve before the unit, the unit before serve), with *control* admitted before
   any mapping or record exists, a *session* call refused until the mapping is
   written, *whoami* through the shim, a foreign caller refused, the cgroup file
   removed ending service, and an *ERR version* from a client inside the unit.
-  *<clown\_bin>* is a pre-built clown named by the caller; the recipe builds
-  nothing outside this worktree.
+  *<clown\_bin>* is a pre-built clown and *<seam\_bin>* clown's separate
+  *clown-bridge-seam* binary (which runs clown's real writers for
+  *bridge.cgroup* and the unit record), both named by the caller; the recipe
+  builds nothing outside this worktree.
 - The tests named in the sections above, in *internal/0/bridge*,
   *internal/alfa/bridgeserver*, *internal/alfa/crossinglog* and *cmd/spinclass*.
 
