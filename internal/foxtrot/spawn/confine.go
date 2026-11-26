@@ -193,8 +193,8 @@ type unitSpec struct {
 	// EgressAllow is a pointer so "unset" (omitted: clown's own default list
 	// applies) differs from an explicit empty list (deny everything).
 	EgressAllow *[]string `json:"egress_allow,omitempty"`
-	// Bridge is the clown launch-spec `bridge` field (docs/plans/2026-11-25-
-	// bridge-wire-v1.md, launcher section), the ONE operator switch of the
+	// Bridge is the clown launch-spec `bridge` field (spinclass-bridge(7),
+	// "The one switch"), the ONE operator switch of the
 	// bridge: omitted or empty = OFF; "offered" = on, the launch continues when
 	// the bridge cannot be set up; "required" = on, the launch is refused then.
 	// It is set from the trusted [confinement] bridge knob only.

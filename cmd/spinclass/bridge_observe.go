@@ -15,7 +15,7 @@ import (
 const bridgeMetricSlots = 16
 
 // bridgeObserver is the listener's Observer: every connection's outcome goes
-// to the crossing log (bridge contract v1, "Crossing log") and to statsd as a
+// to the crossing log (spinclass-bridge(7), "Observability") and to statsd as a
 // counter and a timer.
 type bridgeObserver struct {
 	log   crossingRecorder

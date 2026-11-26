@@ -1,5 +1,5 @@
 // Package crossinglog is the frontend's record of what crossed the bridge
-// (bridge contract v1, "Crossing log"): one NDJSON line per crossing in
+// (spinclass-bridge(7), "Observability"): one NDJSON line per crossing in
 // <state>/spinclass/bridge/<principal>.ndjson.
 //
 // The redaction rule is normative: argument VALUES are never written. A line

@@ -219,6 +219,13 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `SSH_AUTH_SOCK`; a driver keeps his agent. `sc session-key`,
   `sc keyholder-stop --all`; units, logs and recovery: `[keyholder]` in
   `spinclass-sweatfile(5)`; the four tool pins: `spinclass-build-pins(7)`.
+- **Per-session bridge** (clown FDR 0048; `internal/0/bridge`,
+  `internal/alfa/bridgeserver`, `internal/alfa/crossinglog`,
+  `cmd/spinclass/bridge_*.go`): a confined session's one door to spinclass's
+  own services, one listener per session inside `serve`, off by default behind
+  `[confinement] bridge`; the contract, start order, wire, refusals and
+  observability are `spinclass-bridge(7)` (design history:
+  `docs/plans/2026-11-25-bridge-wire-v1.md`).
 
 ## Sweatfile config
 

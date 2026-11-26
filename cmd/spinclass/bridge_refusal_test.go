@@ -1,9 +1,9 @@
 package main
 
 // The refusal text of each session verb over the bridge. The literals below
-// are the table "Refusal texts" in docs/plans/2026-11-25-bridge-wire-v1.md,
-// copied here on purpose: a change to the code's text that does not change
-// the table (and this file) fails.
+// are the refusal texts of spinclass-bridge(7), section "Refusals", copied
+// here on purpose: a change to the code's text that does not change the page
+// (and this file) fails.
 
 import (
 	"strings"

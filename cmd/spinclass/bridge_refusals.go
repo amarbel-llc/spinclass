@@ -11,7 +11,7 @@ import (
 )
 
 // The refusal texts of the session verbs over the bridge are the table
-// "Refusal texts" in docs/plans/2026-11-25-bridge-wire-v1.md. Each says what is
+// "Refusals" in spinclass-bridge(7). Each says what is
 // true: a gated verb has no named right a session inside its unit could hold
 // (the gate is the transport, not a handle right), so it says so and names who
 // may do the thing instead; a verb that needs a trusted setting names the

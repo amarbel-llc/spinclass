@@ -11,7 +11,7 @@ import (
 )
 
 // bridgeRefusalPrefix opens every refusal the bridge contract defines
-// (docs/plans/2026-11-25-bridge-wire-v1.md, "Refusal text"); the session
+// (spinclass-bridge(7), "Refusals"); the session
 // service turns a tool result that opens with it into JSON-RPC error -32001.
 const bridgeRefusalPrefix = "refused: "
 

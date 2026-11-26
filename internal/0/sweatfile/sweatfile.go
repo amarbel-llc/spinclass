@@ -251,7 +251,7 @@ type Confinement struct {
 	// would run what a worker planted. The last trusted layer that sets it wins.
 	HarnessConfigWritable *bool `toml:"harness-config-writable"`
 	// Bridge is the ONE operator switch of the per-session bridge
-	// (docs/plans/2026-11-25-bridge-wire-v1.md): "off" (also unset) opens
+	// (spinclass-bridge(7)): "off" (also unset) opens
 	// nothing; "offered" asks clown for the bridge and the launch continues when
 	// it cannot be set up; "required" refuses the launch when it cannot. The
 	// last trusted layer that sets it wins. It is emitted as the launch spec's

@@ -1,5 +1,5 @@
 // Package bridgeserver is the per-session listener of bridge contract v1
-// (docs/plans/2026-11-25-bridge-wire-v1.md) inside the serve process. It owns
+// (spinclass-bridge(7)) inside the serve process. It owns
 // the socket, the peer check, the hello and its reply, the per-session stream
 // caps and the control stream; the byte streams after "OK\n" belong to
 // services (the session service is a SessionHandler a later batch supplies).

@@ -1199,7 +1199,7 @@ in the frontend).
 *bridge*
 	String, *"off"* (the default), *"offered"* or *"required"*: the ONE
 	operator switch of the per-session bridge
-	(docs/plans/2026-11-25-bridge-wire-v1.md). It becomes the launch spec's
+	(*spinclass-bridge*(7)). It becomes the launch spec's
 	*bridge* field, which is left out for *"off"* and for an unset knob.
 	*"offered"* asks clown for the bridge and the launch continues without it
 	when it cannot be set up; *"required"* refuses the launch then. Only when
