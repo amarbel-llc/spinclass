@@ -62,6 +62,15 @@ func TestConcurrentStartsOfOneSessionMakeOnePairAndMintOnce(t *testing.T) {
 
 // A close racing a resume is serialised: afterwards the session either has a
 // whole running pair or no directory at all, never a half-removed one.
+//
+// THIS TEST IS NOT EVIDENCE THAT THE LOCK WORKS. It passes with the flock taken
+// out (checked by mutation: the acquire made a no-op, with the fake runner's Start
+// and Stop slowed to 4 ms to widen the window): with the fakes, Stop and Start
+// leave a consistent result in either order, lock or no lock. What proves the lock
+// is TestAStopRacingAStartAcrossTheLockUnlinkNeverLetsTwoHoldersIn (200 rounds, a
+// real flock, goes red when the same-inode check or the lock is dropped) and
+// TestConcurrentStartsOfOneSessionMakeOnePairAndMintOnce. This one stays as a
+// check that nothing half-removed is ever left behind.
 func TestAStopRacingAStartLeavesAWholePairOrNone(t *testing.T) {
 	for round := 0; round < 12; round++ {
 		l, f, _ := launcher(t)
