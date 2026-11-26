@@ -52,6 +52,13 @@ func queueStopAs(st *session.State, requester, principal, reason, when string, c
 	if confinedCaller {
 		reason = cleanConfinedReason(reason)
 	}
+	if confinedCaller && when == restartWhenNow {
+		// A stop now kills the current turn and any running job: the stop-now right
+		// (a holder, or the operator's [[permissions.stop-now-allow]]) is what permits
+		// it, never a session's own say-so (#532).
+		text := bridgeRefusalPrefix + "stop-this-session with when=now is not available to a session inside its unit; a holder with the right \"stop-now\" on this session (stop-child-session), or the operator running `sc stop <session> --now` at a terminal outside the unit, can stop it now"
+		return "", &policyRefusalError{msg: text, bridge: text}
+	}
 	if st.StoppedAt != nil {
 		return "", fmt.Errorf("%s is already stopped (since %s, by %s); start it before stopping it again", st.Key(), st.StoppedAt.Format(time.RFC3339), st.StoppedBy)
 	}
@@ -87,6 +94,9 @@ func queueStopAs(st *session.State, requester, principal, reason, when string, c
 	expanded := expandRestartHandoff(argv, principal, st.Key(), when, "", reason)
 	if out, herr := restartHandoffFn(st.WorktreePath, expanded); herr != nil {
 		if werr := updateLoadedSession(st, func(cur *session.State) bool {
+			if confinedCaller && !isRequest(cur.RestartRequest, request) {
+				return false // a confined caller clears only the request it queued
+			}
 			cur.RestartRequest = nil
 			return true
 		}); werr != nil {
@@ -148,7 +158,7 @@ type stopThisSessionParams struct {
 // runStopThisSession is the stop-this-session tool body: a session may stop
 // itself with no right, like restart-this-session.
 func runStopThisSession(p stopThisSessionParams) (string, error) {
-	return runStopThisSessionAs(p, false)
+	return runStopThisSessionAs(p, cliInsideUnit())
 }
 
 // runStopThisSessionAs is runStopThisSession for a caller the handler classified

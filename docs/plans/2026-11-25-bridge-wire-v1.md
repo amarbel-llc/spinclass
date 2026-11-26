@@ -64,7 +64,14 @@ non-empty, and clown does that only when the field asked.
 in the hook inside the unit. Over the bridge a verb refuses `force`, `fresh_env`
 and `posture` itself. The same session can also reach the frontend by the older
 route clown binds into the unit, where a call carries no origin; the verbs now
-ask whether the caller classifies as confined on any transport.
+ask whether the caller classifies as confined on any transport. That
+classification goes by EVIDENCE (R2-M1): confined when the process is in an
+agent unit, when spinclass wrote a confined launch for the session (the spec,
+before clown's unit record exists, so no window), when a unit record or the
+principal mapping says so, or when a record that exists cannot be read; with no
+evidence at all it behaves as master. It is `confinement.Evidence`
+(`Unconfined`, `Absent`, `Confined`, `Unreadable`), used only by the session
+verbs; the gated tools still fail closed.
 
 **Liveness (S-M2).** A state file that says "listening" was believed forever,
 even after its serve was killed. It now carries the serve's pid, the start ticks

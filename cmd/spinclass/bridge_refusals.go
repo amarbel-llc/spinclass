@@ -26,7 +26,7 @@ const (
 // escalation arguments itself and names who can do the thing (a holder with the
 // right, or the operator, both outside the unit).
 const (
-	bridgeRestartEscalationRefusal = bridgeRefusalPrefix + "restart-this-session with force, fresh_env or posture is not available to a session inside its unit; a holder with the right \"restart\" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force, --fresh-env or --posture (--force is always asked of the human)"
+	bridgeRestartEscalationRefusal = bridgeRefusalPrefix + "restart-this-session with force, fresh_env or posture is not available to a session inside its unit; a holder with the right \"restart\" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force or --posture (--force is always asked of the human); no command offers fresh_env"
 	bridgeCloseForceRefusal        = bridgeRefusalPrefix + "close-this-session takes no force argument and never discards work; the operator at a terminal outside the unit discards work with `sc close --force <session>`"
 )
 

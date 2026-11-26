@@ -303,9 +303,9 @@ the frontend sends them (error -32001, the text prefixed *refused: *):
   (*keep* included): *restart-this-session with force, fresh\_env or posture is
   not available to a session inside its unit; a holder with the right "restart"
   on this session, or the operator at a terminal outside the unit, runs
-  `sc restart-child-session <session>` with --force, --fresh-env or --posture
-  (--force is always asked of the human)*. Nothing is recorded and no hand-off
-  runs.
+  `sc restart-child-session <session>` with --force or --posture (--force is
+  always asked of the human); no command offers fresh\_env*. Nothing is recorded
+  and no hand-off runs.
 - *close-this-session* with *force* (any value): *close-this-session takes no
   force argument and never discards work; the operator at a terminal outside the
   unit discards work with `sc close --force <session>`*.
@@ -669,9 +669,13 @@ hand-made entry). (#530)
 *stop-this-session* is not one of the five session tools, so over the bridge it is
 refused as an unknown tool. On the older serve route (clown's loopback relay,
 calls with no origin) it exists; a confined caller there may not displace another
-party's queued request, but nothing yet refuses *when=now* for it (the
-always-ask the tool description names is the in-unit hook, which that route
-skips). It stops only the caller's own session. (#532)
+party's queued request or stop a session now (*when=now* is refused: the stop-now
+right, a holder's *stop-child-session* or the operator's `sc stop <session> --now`
+at a terminal outside the unit, is what permits it; the always-ask the tool
+description names is the in-unit hook, which that route skips). It stops only
+the caller's own session. A confined caller is also refused a restart of a
+stopped session (a holder with the right "start", or the operator, runs
+`sc start-stopped <session> --message <text>`). (#532)
 
 ## Deploy note: the floor tightens existing confined sessions
 
@@ -680,10 +684,24 @@ The refusals of *force*, *fresh\_env* and *posture* for a confined
 party queued, apply to EVERY confined session on deploy, not only to sessions
 launched with the bridge: they are keyed to the caller classifying as confined,
 on both doors, outside the one switch. They only narrow what a confined session
-could do before. A caller that classifies as confined only because the
-classifier could not read its evidence (no serve record, two live serves of one
-principal, an unresolvable state directory) is refused too, as the other gated
-tools are, and is told the classifier's reason.
+could do before.
+
+These verbs classify a call that carries no origin by EVIDENCE, never by
+default. It is confined when the process runs inside an agent unit, when
+spinclass wrote a confined launch for the session (the launch spec, written
+before clown reports its unit record, so there is no window between the two),
+when a unit record or the principal mapping says so, or when a record that
+exists cannot be read or parsed (evidence exists, its content is unknown, so it
+is refused, with the state named). With NO evidence at all (no record, no
+launch, an unresolved principal or state directory, a serve with no record of
+its own) the call behaves as before this change. The gated tools
+(*grit_\**, *perms*) are not part of this rule and still fail closed. The
+inputs are all host side: the serve's own cgroup and environment (set by the
+frontend that started it, not by a call), and files under the frontend state
+directory (the session records, the unit records and specs, the principal
+mappings, the serve records), which a unit does not see. The terminal forms
+of restart-this-session, stop-this-session and cancel-restart are confined only
+when their own process runs inside an agent unit.
 
 ## The switch reaches only new spawns
 

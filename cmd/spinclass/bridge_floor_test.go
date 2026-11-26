@@ -14,7 +14,7 @@ import (
 )
 
 // The text of an escalation refused over the bridge: who can do it, and how.
-const refusalRestartEscalation = "refused: restart-this-session with force, fresh_env or posture is not available to a session inside its unit; a holder with the right \"restart\" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force, --fresh-env or --posture (--force is always asked of the human)"
+const refusalRestartEscalation = "refused: restart-this-session with force, fresh_env or posture is not available to a session inside its unit; a holder with the right \"restart\" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force or --posture (--force is always asked of the human); no command offers fresh_env"
 
 func TestBridgedRestartRefusesEveryEscalation(t *testing.T) {
 	for _, args := range []string{

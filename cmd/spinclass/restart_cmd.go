@@ -295,6 +295,9 @@ func queueRestartPosture(st *session.State, requester, principal, reason string,
 func queueRestartPostureAs(st *session.State, requester, principal, reason string, force bool, posture string, confinedCaller bool) (string, error) {
 	if confinedCaller {
 		reason = cleanConfinedReason(reason)
+		if st.StoppedAt != nil {
+			return "", stoppedSessionRefusal("restart-this-session", st)
+		}
 	}
 	argv, why, err := restartPlanWhy(st, principal, force)
 	if err != nil {
@@ -345,6 +348,9 @@ func queueRestartPostureAs(st *session.State, requester, principal, reason strin
 	expanded := expandRestartHandoff(argv, principal, st.Key(), when, posture, reason)
 	if out, herr := restartHandoffFn(st.WorktreePath, expanded); herr != nil {
 		if werr := updateLoadedSession(st, func(cur *session.State) bool {
+			if confinedCaller && !isRequest(cur.RestartRequest, request) {
+				return false // a confined caller clears only the request it queued
+			}
 			cur.RestartRequest = nil
 			return true
 		}); werr != nil {
@@ -408,7 +414,7 @@ func callerSession() (principal string, st *session.State, err error) {
 
 // runRestartThisSession is the restart-this-session tool body.
 func runRestartThisSession(p restartThisSessionParams) (string, error) {
-	return runRestartThisSessionFor(context.Background(), p, false)
+	return runRestartThisSessionFor(context.Background(), p, cliInsideUnit())
 }
 
 // runRestartThisSessionFor is runRestartThisSession for a call with ctx: a call
@@ -1311,10 +1317,10 @@ func cancelRestartParamList() []command.Param {
 // call the hand-off: the frontend drops its pending restart when restart-preflight
 // next answers "none". Nothing queued is a success, so the call is idempotent.
 func runCancelRestart(p cancelRestartParams) (string, error) {
-	// The terminal's form (RunCLI) is ungated: a CLI process has no serve record,
-	// so asking the serve classifier about it would answer "confined" for
-	// everyone (B-M1). Evidence of confinement comes only from the gated handler.
-	return runCancelRestartFor(context.Background(), p, false)
+	// The terminal's form (RunCLI) has no serve principal, so the serve classifier
+	// does not apply to it (B-M1). Its one host-side fact is whether this very
+	// process runs inside an agent unit (cliInsideUnit): inside one it is confined.
+	return runCancelRestartFor(context.Background(), p, cliInsideUnit())
 }
 
 // runCancelRestartFor is runCancelRestart for a call with ctx: the own form of a
@@ -1364,6 +1370,11 @@ func runCancelRestartFor(ctx context.Context, p cancelRestartParams, confinedOwn
 			cleared = &req
 			cur.RestartRequest = nil
 			return true
+		case restartAwaitingReturn(cur, now) && confinedOwn && cur.RestartingBy != sessionsOwnID:
+			// The restart or stop a preflight already approved is another party's act:
+			// a confined session may not stamp it cancelled.
+			refused = &session.RestartRequest{Requester: cur.RestartingBy, Reason: cur.RestartingReason, Kind: cur.RestartingKind}
+			return false
 		case restartAwaitingReturn(cur, now):
 			at := *cur.RestartingAt
 			approvedAt = &at
@@ -1468,6 +1479,24 @@ func pendingRequestRefusal(tool string, req session.RestartRequest) *policyRefus
 	}
 	text := fmt.Sprintf("%s%s cannot replace this session's queued %s: it was queued by %s, not by this session; ask them or wait for it to be consumed (the one who queued it, or the operator, runs `sc cancel-restart --child <session>` at a terminal outside the unit)",
 		bridgeRefusalPrefix, tool, what, requesterKind(req))
+	return &policyRefusalError{msg: text, bridge: text}
+}
+
+// isRequest says cur is the very request a caller queued (same requester and
+// time), so a confined caller can tell its own request from another party's.
+func isRequest(cur, mine *session.RestartRequest) bool {
+	return cur != nil && mine != nil && cur.Requester == mine.Requester && cur.RequestedAt.Equal(mine.RequestedAt)
+}
+
+// stoppedSessionRefusal is the refusal for a confined session asking to restart a
+// session that is stopped: starting it again is a holder's act, not its own.
+func stoppedSessionRefusal(tool string, st *session.State) *policyRefusalError {
+	who := "another principal that holds this session"
+	if st.StoppedBy == session.OperatorRestartRequester {
+		who = "the operator"
+	}
+	text := fmt.Sprintf("%s%s cannot act on a stopped session: it was stopped by %s; a holder with the right \"start\" on this session, or the operator, runs `sc start-stopped <session> --message <text>` at a terminal outside the unit",
+		bridgeRefusalPrefix, tool, who)
 	return &policyRefusalError{msg: text, bridge: text}
 }
 
