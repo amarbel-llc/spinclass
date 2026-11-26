@@ -286,6 +286,11 @@ inside its unit is not allowed to use), and it says who may do the thing instead
 policy refusal names the rule and who can lift it, never a path the session
 itself has. No text carries a value from the request.
 
+The older serve route is not an allow-list: it serves the whole registry and
+every handler decides for itself (a deny gate), kept complete by a test that
+gives every registered tool exactly one class. It goes away when clown stops
+binding the serve socket into the unit (spinclass#525).
+
 The always-ask floor lives only in the hook that runs inside the unit, so a
 forced or widening act never rests on it over the bridge: the verbs refuse the
 escalation arguments themselves, whatever their value, for any caller that
