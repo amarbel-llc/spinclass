@@ -74,7 +74,10 @@ func ReadKeyholderSwitch(passwdHome string) (v KeyholderSwitchValue, present boo
 	}
 	path := KeyholderSwitchPath(passwdHome)
 	fi, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
+	// A path component that is a file (ENOTDIR) names no switch file either: a host
+	// that never used the key holder must launch as before (L-5 of the switch
+	// review).
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return KeyholderSwitchDefault, false, nil
 	}
 	if err != nil {
@@ -94,6 +97,14 @@ func ReadKeyholderSwitch(passwdHome string) (v KeyholderSwitchValue, present boo
 	}
 	if !fi2.Mode().IsRegular() {
 		return "", true, switchFileErr(path, errors.New("it is not a regular file"))
+	}
+	// The writer checks owner and mode; so does the reader (L-7): a file of another
+	// user, or one group or other can write, is not the operator's word.
+	if st, ok := fi2.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
+		return "", true, switchFileErr(path, fmt.Errorf("it is owned by uid %d, not by this account (uid %d)", st.Uid, os.Getuid()))
+	}
+	if fi2.Mode().Perm()&0o022 != 0 {
+		return "", true, switchFileErr(path, fmt.Errorf("it is writable by group or other (%s): `chmod go-w` it", fi2.Mode().Perm()))
 	}
 	if fi2.Size() > keyholderSwitchMaxBytes {
 		return "", true, switchFileErr(path, fmt.Errorf("it holds %d bytes; it holds one word", fi2.Size()))
@@ -145,18 +156,20 @@ func WriteKeyholderSwitch(passwdHome string, v KeyholderSwitchValue) error {
 		return fmt.Errorf("%s is owned by uid %d, not by this account (uid %d)", dir, st.Uid, os.Getuid())
 	}
 	if di.Mode().Perm()&0o022 != 0 {
-		return fmt.Errorf("%s is writable by group or other (%s): the key holder switch file would not be the operator's alone", dir, di.Mode().Perm())
+		return fmt.Errorf("%s is writable by group or other (%s): the key holder switch file would not be the operator's alone; run `chmod go-w %s`", dir, di.Mode().Perm(), dir)
 	}
 	if ti, err := os.Lstat(path); err == nil && !ti.Mode().IsRegular() {
 		return fmt.Errorf("%s exists and is not a regular file (%s): remove it by hand; a link is never followed or replaced", path, ti.Mode().Type())
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	tmp := filepath.Join(dir, fmt.Sprintf(".keyholder-switch.%d.tmp", os.Getpid()))
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	// A random name (O_EXCL, 0600): a leftover of a killed run or a file another
+	// process pre-created cannot make the command fail with a bare EEXIST (L-8).
+	f, err := os.CreateTemp(dir, ".keyholder-switch.*.tmp")
 	if err != nil {
 		return fmt.Errorf("creating the temporary switch file: %w", err)
 	}
+	tmp := f.Name()
 	_, werr := f.WriteString(string(v) + "\n")
 	if werr == nil {
 		werr = f.Sync()
@@ -171,6 +184,12 @@ func WriteKeyholderSwitch(passwdHome string, v KeyholderSwitchValue) error {
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("replacing %s: %w", path, err)
+	}
+	// Make the rename itself durable: after a power cut the old word must not come
+	// back (best effort: a directory that cannot be synced does not undo the write).
+	if d, derr := os.Open(dir); derr == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 	return nil
 }
