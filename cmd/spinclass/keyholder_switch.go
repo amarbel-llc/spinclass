@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -42,12 +43,32 @@ type keyholderSwitch struct {
 // not be able to swap the program the pair runs. An unreadable or invalid
 // hierarchy in either context is an error (fail closed, never the operator's
 // agent).
+//
+// A failure of a source this feature added (the account database's home, the
+// layers under it, the driver's own context) refuses only with evidence the
+// switch is or was on for this host; otherwise it is warned once and the launch
+// proceeds as before (keyholderNewSourceFailure). A [keyholder] table that does
+// not parse or validate, and the target repo's own hierarchy not loading, still
+// refuse: the first names the key holder, the second refused before it existed.
 func resolveKeyholderSwitch(home, repoPath string) (keyholderSwitch, error) {
+	var soft []error
 	sw, err := resolveKeyholderLayers(home, repoPath)
 	if err != nil {
-		return sw, err
+		if !isSoftKeyholderErr(err) {
+			return sw, err
+		}
+		soft = append(soft, err)
 	}
 	if err := applyPasswdHomeLayers(&sw, home, repoPath); err != nil {
+		if !isSoftKeyholderErr(err) {
+			return sw, err
+		}
+		soft = append(soft, err)
+	}
+	if len(soft) == 0 {
+		return sw, nil
+	}
+	if err := keyholderNewSourceFailure(errors.Join(soft...), sw.On); err != nil {
 		return sw, err
 	}
 	return sw, nil
@@ -69,14 +90,14 @@ var keyholderPasswdHomeFn = trustedhome.Home
 func applyPasswdHomeLayers(sw *keyholderSwitch, home, repoPath string) error {
 	pw, err := keyholderPasswdHomeFn()
 	if err != nil {
-		return fmt.Errorf("resolving the account's home for [keyholder]: %w (sessions are not launched until it resolves: the switch is read from the passwd home, never from $HOME alone)", err)
+		return softKeyholderErr(fmt.Errorf("resolving the account's home for [keyholder]: %w (the switch is read from the passwd home, never from $HOME alone)", err))
 	}
 	if filepath.Clean(pw) == filepath.Clean(home) {
 		return nil
 	}
 	ph, err := sweatfileio.LoadHierarchy(pw, repoPath)
 	if err != nil {
-		return fmt.Errorf("reading the sweatfiles under the account's home for [keyholder]: %w", err)
+		return softKeyholderErr(fmt.Errorf("reading the sweatfiles under the account's home for [keyholder]: %w", err))
 	}
 	on, _, err := sweatfileio.TrustedKeyholderMode(ph, pw, repoPath)
 	if err != nil {
@@ -113,7 +134,7 @@ func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
 	}
 	dh, err := sweatfileio.LoadHierarchy(home, driver)
 	if err != nil {
-		return sw, fmt.Errorf("reading the driver's sweatfiles for [keyholder] (%s): %w", driver, err)
+		return sw, softKeyholderErr(fmt.Errorf("reading the driver's sweatfiles for [keyholder] (%s): %w", driver, err))
 	}
 	dOn, _, err := sweatfileio.TrustedKeyholderMode(dh, home, driver)
 	if err != nil {

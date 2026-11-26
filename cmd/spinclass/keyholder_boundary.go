@@ -43,7 +43,9 @@ func keyholderWantsPair(home, repoPath, sessionKey string, spawned bool) (bool, 
 func checkRelaunchBoundary(st *session.State, switchOn bool) error {
 	stateDir, err := confinement.DefaultStateDir()
 	if err != nil {
-		return fmt.Errorf("cannot tell whether %s was launched confined (%v), so its relaunch could change what its unit binds; %s", st.Key(), err, closeCost(st))
+		// A source this feature added: it refuses only where the key holder is on or
+		// has been (keyholderNewSourceFailure); elsewhere the relaunch is as before.
+		return keyholderNewSourceFailure(fmt.Errorf("cannot tell whether %s was launched confined (%v), so its relaunch could change what its unit binds; %s", st.Key(), err, closeCost(st)), switchOn)
 	}
 	if !confinement.LaunchedConfined(stateDir, st.WorktreePath) {
 		return nil
@@ -61,14 +63,14 @@ func checkRelaunchBoundary(st *session.State, switchOn bool) error {
 func relaunchBoundaryNow(st *session.State) error {
 	stateDir, err := confinement.DefaultStateDir()
 	if err != nil {
-		return fmt.Errorf("cannot tell whether %s was launched confined (%v), so its relaunch could change what its unit binds; %s", st.Key(), err, closeCost(st))
+		return keyholderNewSourceFailure(fmt.Errorf("cannot tell whether %s was launched confined (%v), so its relaunch could change what its unit binds; %s", st.Key(), err, closeCost(st)), false)
 	}
 	if !confinement.LaunchedConfined(stateDir, st.WorktreePath) {
 		return nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("resolving the home directory for the key holder: %w", err)
+		return keyholderNewSourceFailure(fmt.Errorf("resolving the home directory for the key holder: %w", err), false)
 	}
 	on, err := keyholderWantsPairFn(home, st.RepoPath, st.Key(), resumeIsSpawned(st))
 	if err != nil {

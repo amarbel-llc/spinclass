@@ -45,7 +45,9 @@ var startHandoffExecFn = func(dir string, argv, env []string) (string, error) {
 func startHandoffEnvFor(child *session.State, base []string, stderr io.Writer) ([]string, func(), error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolving the home directory for the key holder: %w", err)
+		// A source this feature added: it refuses only where the key holder is on or
+		// has been; elsewhere the hand-off runs as it always did.
+		return nil, nil, keyholderNewSourceFailure(fmt.Errorf("resolving the home directory for the key holder: %w", err), false)
 	}
 	switchOn, err := keyholderWantsPairFn(home, child.RepoPath, child.Key(), true)
 	if err != nil {
@@ -53,7 +55,7 @@ func startHandoffEnvFor(child *session.State, base []string, stderr io.Writer) (
 	}
 	stateDir, derr := confinement.DefaultStateDir()
 	if derr != nil {
-		return nil, nil, fmt.Errorf("cannot tell whether %s was launched confined (%v); refusing to start it with the caller's environment", child.Key(), derr)
+		return nil, nil, keyholderNewSourceFailure(fmt.Errorf("cannot tell whether %s was launched confined (%v); refusing to start it with the caller's environment", child.Key(), derr), switchOn)
 	}
 	confined := confinement.LaunchedConfined(stateDir, child.WorktreePath)
 	if confined {
