@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
@@ -68,10 +70,73 @@ func ungatedCLI[P any](run func(P) (string, error)) func(context.Context, json.R
 	}
 }
 
-// confinedCall says the caller of this call classifies as confined, on any
-// transport: a call that arrived on the bridge, or a call with no origin
-// (stdio, or clown's loopback relay to the older serve socket) from a serve
-// whose principal a unit record names. It fails closed like serveCallerConfined.
+// serveCallerEvidence classifies this serve's caller for the verbs that hold an
+// escalation floor (restart-this-session, cancel-restart, stop-this-session) by
+// EVIDENCE: a process inside an agent unit, a frontend record naming the
+// principal confined, or a record that exists and cannot be read refuse; an
+// absence of evidence (no record, an unresolved principal or state directory, a
+// serve with no record of its own) does not, so an unconfined session on a host
+// in that state behaves as on master. It is NOT serveCallerConfined: the grit
+// and perms gates keep failing closed, as on master. It is a variable so tests
+// can stand in for the frontend state.
+var serveCallerEvidence = classifyServeCallerEvidence
+
+func classifyServeCallerEvidence() (confinement.Evidence, string) {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		// No state directory means no record to read, but a process inside an agent
+		// unit is confined whatever the records say.
+		if inside, ierr := confinement.InsideAgentUnit(confinement.Host{}); ierr == nil && inside {
+			return confinement.EvidenceConfined, "this process runs inside a clown agent unit"
+		}
+		return confinement.EvidenceAbsent, fmt.Sprintf("state directory unresolved: %v", err)
+	}
+	worktree, ev, why := serveWorktree()
+	if ev != confinement.EvidenceAbsent {
+		return ev, why
+	}
+	return confinement.ClassifyServeCallerEvidence(confinement.Host{}, stateDir, os.Getenv("CLOWN_SESSION_ID"), worktree)
+}
+
+// serveWorktree is the worktree this serve serves, from the serve process's own
+// environment (set by the frontend that started it, not by a call) and the
+// frontend's authoritative session record, never the worktree's copy of it. With
+// no session key it falls back to the serve's own working directory. A record
+// that exists and cannot be read is unreadable evidence.
+func serveWorktree() (string, confinement.Evidence, string) {
+	if key := os.Getenv("SPINCLASS_SESSION_ID"); key != "" {
+		st, err := session.FindByTarget(key)
+		switch {
+		case err == nil:
+			return st.WorktreePath, confinement.EvidenceAbsent, ""
+		case errors.Is(err, session.ErrTargetNotFound):
+			// no record: fall through to the working directory
+		default:
+			return "", confinement.EvidenceUnreadable, fmt.Sprintf("the session record of %s cannot be read: %v", key, err)
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd, confinement.EvidenceAbsent, ""
+	}
+	return "", confinement.EvidenceAbsent, ""
+}
+
+// cliInsideUnit says the process of a terminal-form (RunCLI) call runs inside a
+// clown agent unit, read from this process's own /proc/self/cgroup, which the
+// unit cannot edit. The CLI forms have no serve principal or record to classify
+// by, so this is the whole of their classification: inside a unit they are
+// confined (a read that fails reads as outside, as on master). A variable so a
+// test can stand in for the kernel.
+var cliInsideUnit = func() bool {
+	inside, err := confinement.InsideAgentUnit(confinement.Host{})
+	return err == nil && inside
+}
+
+// confinedCall says the caller of this call is refused the escalations, on any
+// transport: a call that arrived on the bridge (confined by construction), or a
+// call with no origin (stdio, or clown's loopback relay to the older serve
+// socket) for which the frontend's evidence says confined or exists and cannot
+// be read (confinement.Evidence). Absent evidence does not refuse.
 //
 // The always-ask floor lives only in the hook that runs inside the unit, so a
 // verb whose escalation arguments (force, fresh_env, posture) must never rest on
@@ -83,13 +148,15 @@ func confinedCall(ctx context.Context) bool {
 }
 
 // confinedCallWhy is confinedCall with the classifier's reason, for a refusal
-// that must say why a call without an origin counted as confined (B-L1): an
-// unconfined session whose serve cannot be classified (no serve record, two live
-// serves of the principal, an unresolvable state directory) is refused by the
-// same rule as the gated tools on master, and has to be told the true cause, not
-// that it is inside a unit.
+// that must say why a call without an origin was refused (B-L1): a record that
+// exists and cannot be read refuses, and has to be told the true cause, not that
+// the caller is inside a unit.
 func confinedCallWhy(ctx context.Context) (bool, string) {
-	return confinement.ClassifyOrigin(ctx, serveCallerConfined)
+	if o, ok := confinement.OriginFrom(ctx); ok && o.Bridged() {
+		return true, confinement.BridgedWhy
+	}
+	ev, why := serveCallerEvidence()
+	return ev.Refuses(), why
 }
 
 // restartEscalationRefusal is the refusal of force, fresh_env or posture for a

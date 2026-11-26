@@ -17,19 +17,28 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 // withServeClassifier makes this serve classify its caller as confined or not
-// for the test, restoring the stub TestMain installs.
+// for the test (the gated tools' classifier and the verbs' evidence classifier
+// both), restoring the stubs TestMain installs. The fault-state tests of
+// bridge_evidence_test.go do not use it: they put the real classifier back.
 func withServeClassifier(t *testing.T, confined bool) {
 	t.Helper()
-	original := serveCallerConfined
-	t.Cleanup(func() { serveCallerConfined = original })
+	original, originalEvidence := serveCallerConfined, serveCallerEvidence
+	t.Cleanup(func() { serveCallerConfined, serveCallerEvidence = original, originalEvidence })
 	serveCallerConfined = func() (bool, string) {
 		if confined {
 			return true, "unit record names the principal"
 		}
 		return false, "unconfined"
+	}
+	serveCallerEvidence = func() (confinement.Evidence, string) {
+		if confined {
+			return confinement.EvidenceConfined, "unit record names the principal"
+		}
+		return confinement.EvidenceUnconfined, "unconfined"
 	}
 }
 
@@ -99,20 +108,23 @@ func TestOlderServeRouteStillQueuesAPlainRestartAndLeavesUnconfinedForceAlone(t 
 	})
 }
 
-// An UNCONFINED session whose serve cannot be classified (no serve record, two
-// live serves of the principal, an unresolvable state directory) fails closed to
-// confined, as every gated tool does on master: it is refused force, posture and
-// the displacement of another party's request, and the refusal says WHY it counts
-// as confined, never that it is inside a unit (B-L1). With the classifier saying
+// A caller whose evidence EXISTS and cannot be read is refused force, posture and
+// the displacement of another party's request (clarabell's proviso: evidence
+// exists, its content is unknown), and the refusal says WHY it counts as
+// confined, never that it is inside a unit (B-L1). The evidence-absent cases (no
+// serve record, an unresolvable state directory) are the fault-state tests of
+// bridge_evidence_test.go: they behave as on master. With the classifier saying
 // unconfined, nothing changes from master.
-func TestAnUnclassifiableServeIsRefusedWithTheClassifiersReasonNotAClaimItIsInsideAUnit(t *testing.T) {
+func TestUnreadableEvidenceIsRefusedWithTheClassifiersReasonNotAClaimItIsInsideAUnit(t *testing.T) {
 	f := newLiarFixture(t)
-	original := serveCallerConfined
-	t.Cleanup(func() { serveCallerConfined = original })
-	serveCallerConfined = func() (bool, string) { return true, "this serve has no record" }
+	original := serveCallerEvidence
+	t.Cleanup(func() { serveCallerEvidence = original })
+	serveCallerEvidence = func() (confinement.Evidence, string) {
+		return confinement.EvidenceUnreadable, "unit record 1.json does not parse"
+	}
 
 	text, isErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(`{"force":true}`))
-	if !isErr || !strings.Contains(text, "this serve has no record") || strings.Contains(text, "inside its unit") {
+	if !isErr || !strings.Contains(text, "unit record 1.json does not parse") || strings.Contains(text, "inside its unit") {
 		t.Fatalf("got isErr=%v %q, want the classifier's reason and no claim of a unit", isErr, text)
 	}
 	if len(*f.handoff) != 0 {
@@ -126,7 +138,7 @@ func TestAnUnclassifiableServeIsRefusedWithTheClassifiersReasonNotAClaimItIsInsi
 	}
 
 	// Classified unconfined: the same call is not refused by the floor.
-	serveCallerConfined = func() (bool, string) { return false, "unconfined" }
+	serveCallerEvidence = func() (confinement.Evidence, string) { return confinement.EvidenceUnconfined, "unconfined" }
 	utext, uErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(`{"force":true,"reason":"wedged"}`))
 	if uErr || strings.Contains(utext, "classifies as confined") {
 		t.Errorf("unconfined: got isErr=%v %q, want it queued as on master", uErr, utext)
