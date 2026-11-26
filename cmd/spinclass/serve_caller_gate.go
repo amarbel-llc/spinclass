@@ -47,7 +47,16 @@ func classifyServeCaller() (bool, string) {
 	if err != nil {
 		return true, fmt.Sprintf("state directory unresolved: %v", err)
 	}
-	return confinement.ClassifyServeCaller(confinement.Host{}, stateDir, os.Getenv("CLOWN_SESSION_ID"), os.Getpid())
+	// The launch evidence closes the window between a confined launch and clown's
+	// unit record (R3-M1): spinclass wrote the launch spec before the record, so a
+	// caller of a confined launch is confined from that moment, for the gated
+	// tools as for the session verbs. A session record that exists and cannot be
+	// read is evidence: refuse.
+	worktree, ev, why := serveWorktree()
+	if ev.Refuses() {
+		return true, why
+	}
+	return confinement.ClassifyServeCallerWithLaunch(confinement.Host{}, stateDir, os.Getenv("CLOWN_SESSION_ID"), os.Getpid(), worktree)
 }
 
 // ungatedCLI adapts a tool body to RunCLI, the terminal path, which is not the
@@ -110,7 +119,15 @@ func serveWorktree() (string, confinement.Evidence, string) {
 		case err == nil:
 			return st.WorktreePath, confinement.EvidenceAbsent, ""
 		case errors.Is(err, session.ErrTargetNotFound):
-			// no record: fall through to the working directory
+			// No record the index can load (an unparsable one is skipped as absent):
+			// the frontend's principal mapping, also host-side, still binds the
+			// principal to a worktree, so the launch evidence is read there; then the
+			// working directory.
+			if dir, derr := confinement.DefaultStateDir(); derr == nil {
+				if wt, ok := confinement.WorktreeOfPrincipal(confinement.Host{}, dir, os.Getenv("CLOWN_SESSION_ID")); ok && wt != "" {
+					return wt, confinement.EvidenceAbsent, ""
+				}
+			}
 		default:
 			return "", confinement.EvidenceUnreadable, fmt.Sprintf("the session record of %s cannot be read: %v", key, err)
 		}

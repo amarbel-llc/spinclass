@@ -134,6 +134,28 @@ func ClassifyServeCaller(sys System, stateDir, principal string, ownPID int) (co
 	return classifyByServeRecords(sys, stateDir, principal, ownPID)
 }
 
+// ClassifyServeCallerWithLaunch is ClassifyServeCaller narrowed by the launch
+// evidence: a caller the records call unconfined is still confined when
+// spinclass wrote a confined launch for worktree (the unit spec it writes before
+// clown reports its unit record, or the record itself), and when that evidence
+// exists and cannot be read. worktree is the session's worktree as the FRONTEND's
+// own record names it ("" when none is known: then nothing narrows). This closes,
+// for the gated tools (spawn, merge, grit, ...), the window between the confined
+// launch and clown's unit record in which "no unit record names this principal"
+// would read as unconfined. Everything ClassifyServeCaller refuses stays refused;
+// it only ever adds a refusal.
+func ClassifyServeCallerWithLaunch(sys System, stateDir, principal string, ownPID int, worktree string) (confined bool, why string) {
+	if confined, why = ClassifyServeCaller(sys, stateDir, principal, ownPID); confined {
+		return confined, why
+	}
+	if worktree != "" {
+		if ev, w := launchEvidence(sys, stateDir, worktree); ev.Refuses() {
+			return true, w
+		}
+	}
+	return false, why
+}
+
 func classifyByServeRecords(sys System, stateDir, principal string, ownPID int) (bool, string) {
 	dir := servesDir(stateDir)
 	names, err := sys.ReadDir(dir)
