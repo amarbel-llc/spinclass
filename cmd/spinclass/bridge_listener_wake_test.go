@@ -14,11 +14,26 @@ type fakeBridgeServer struct{ err error }
 
 func (f fakeBridgeServer) Serve(context.Context) error { return f.err }
 
+// bridgeFailureMu guards the slices stubBridgeFailureHook returns: the hook is
+// called from the listener's supervising goroutine while a test reads it.
+var bridgeFailureMu sync.Mutex
+
+// failuresOf returns a copy of what the hook has recorded so far.
+func failuresOf(p *[]string) []string {
+	bridgeFailureMu.Lock()
+	defer bridgeFailureMu.Unlock()
+	return append([]string(nil), (*p)...)
+}
+
 func stubBridgeFailureHook(t *testing.T) *[]string {
 	t.Helper()
 	var calls []string
 	orig := bridgeListenerFailed
-	bridgeListenerFailed = func(key string, err error) { calls = append(calls, key+"|"+err.Error()) }
+	bridgeListenerFailed = func(key string, err error) {
+		bridgeFailureMu.Lock()
+		defer bridgeFailureMu.Unlock()
+		calls = append(calls, key+"|"+err.Error())
+	}
 	t.Cleanup(func() { bridgeListenerFailed = orig })
 	return &calls
 }

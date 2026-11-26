@@ -53,7 +53,7 @@ func startOrder(t *testing.T, withMapping bool) startOrderFixture {
 	t.Cleanup(func() { bridgeResolve = old })
 	f.stop = startBridge(context.Background(), e2eHandlerFactory())
 	if f.stop == nil {
-		t.Fatalf("the bridge did not bind (failures %v): it must bind at once, whatever the mapping and record say", *f.failures)
+		t.Fatalf("the bridge did not bind (failures %v): it must bind at once, whatever the mapping and record say", failuresOf(f.failures))
 	}
 	t.Cleanup(f.stop)
 	return f
@@ -92,8 +92,8 @@ func (f startOrderFixture) hello(t *testing.T, service string) string {
 
 func TestFirstLaunchBindsAndAdmitsControlBeforeAnyMappingExists(t *testing.T) {
 	f := startOrder(t, false)
-	if len(*f.failures) != 0 {
-		t.Fatalf("a first launch with no mapping yet is not a failure: %v", *f.failures)
+	if got := failuresOf(f.failures); len(got) != 0 {
+		t.Fatalf("a first launch with no mapping yet is not a failure: %v", got)
 	}
 	if got := f.hello(t, "control"); got != "OK\n" {
 		t.Fatalf("control before the mapping got %q, want OK (clown's provider starts only after control is ready)", got)
@@ -106,8 +106,8 @@ func TestAVerbCallBeforeTheMappingIsRefusedThenAdmittedOnceItIsWritten(t *testin
 	if !strings.HasPrefix(got, "ERR refused ") || strings.Count(got, "\n") != 1 || !strings.Contains(got, "mapping") {
 		t.Fatalf("session before the mapping got %q, want one ERR refused line naming the mapping", got)
 	}
-	if len(*f.failures) != 0 {
-		t.Fatalf("not ready is not a failure: %v", *f.failures)
+	if got := failuresOf(f.failures); len(got) != 0 {
+		t.Fatalf("not ready is not a failure: %v", got)
 	}
 	f.writeMapping(t, sessionTestKey)
 	if got := f.hello(t, "session"); got != "OK\n" {
@@ -127,8 +127,8 @@ func TestARelaunchIgnoresAStaleRecordThatNamesTheOldUnit(t *testing.T) {
 	if got := f.hello(t, "session"); got != "OK\n" {
 		t.Fatalf("session with a stale record naming the old unit got %q, want OK", got)
 	}
-	if len(*f.failures) != 0 {
-		t.Fatalf("a stale record is not a failure: %v", *f.failures)
+	if got := failuresOf(f.failures); len(got) != 0 {
+		t.Fatalf("a stale record is not a failure: %v", got)
 	}
 }
 
@@ -136,8 +136,8 @@ func waitFailure(t *testing.T, failures *[]string) string {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(*failures) > 0 {
-			return (*failures)[0]
+		if got := failuresOf(failures); len(got) > 0 {
+			return got[0]
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

@@ -88,14 +88,14 @@ func TestProductionWiringIsClownsExactPeerCheck(t *testing.T) {
 
 	stop := startBridge(context.Background(), e2eHandlerFactory())
 	if stop == nil {
-		t.Fatalf("env and the real exact check are set, yet the bridge is off: %v", *failures)
+		t.Fatalf("env and the real exact check are set, yet the bridge is off: %v", failuresOf(failures))
 	}
 	defer stop()
 	if _, err := os.Lstat(filepath.Join(dir, "bridge.sock")); err != nil {
 		t.Errorf("the listener left no socket: %v", err)
 	}
-	if len(*failures) != 0 {
-		t.Errorf("failures = %v, want none", *failures)
+	if got := failuresOf(failures); len(got) != 0 {
+		t.Errorf("failures = %v, want none", got)
 	}
 
 	// No env names no bridge, quietly.
