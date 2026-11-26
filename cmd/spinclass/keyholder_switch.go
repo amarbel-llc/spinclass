@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/trustedhome"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/bravo/validate"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
@@ -98,7 +100,11 @@ func applyKeyholderSwitchFile(sw *keyholderSwitch) error {
 		sw.On = false
 	case sweatfileio.KeyholderSwitchOn:
 		if sw.Fibby == "" || sw.Piggy == "" {
-			return fmt.Errorf("the key holder switch file %s says on, but no trusted [keyholder] layer sets fibby and piggy (the host's configuration writes them): launches are refused until it does; run `sc keyholder-switch default` or `sc keyholder-switch off` at a terminal to stop that", sw.FilePath)
+			return keyholder.PreflightError([]keyholder.Problem{{
+				Name: "switch-file",
+				What: fmt.Sprintf("the key holder switch file %s says on, but no trusted [keyholder] layer sets fibby and piggy (the host's configuration writes them): launches are refused until it does", sw.FilePath),
+				Next: validate.KeyholderProgramNext + "; or undo the switch itself with `sc keyholder-switch default` at a terminal",
+			}})
 		}
 		sw.On = true
 	}

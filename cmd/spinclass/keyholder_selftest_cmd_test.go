@@ -73,23 +73,28 @@ func (f *selftestFake) Output(ctx context.Context, argv, env []string) ([]byte, 
 	return nil, nil
 }
 
-// runSelftest runs the command against f and returns its stdout and error.
-func runSelftest(t *testing.T, ctx context.Context, f *selftestFake, p selftestParams) (string, error) {
+// setupSelftest points the self-test at run, f's programs standing for the pins.
+func setupSelftest(t *testing.T, f *selftestFake, run keyholder.Runner) {
 	t.Helper()
 	home, repo := khHome(t, "")
 	t.Setenv("HOME", home)
 	t.Chdir(repo)
-	built := khUseFake(t, f.khFakeRunner)
-	_ = built
+	khUseFake(t, f.khFakeRunner)
 	inner := keyholderLauncherFn
 	keyholderLauncherFn = func(tools keyholder.Tools) (*keyholder.Launcher, error) {
 		l, err := inner(tools)
 		if l != nil {
-			l.Run = f
+			l.Run = run
 		}
 		return l, err
 	}
 	t.Cleanup(keyholder.OverrideSSHPins("/pin/ssh-add", "/pin/ssh-keygen"))
+}
+
+// runSelftest runs the command against f and returns its stdout and error.
+func runSelftest(t *testing.T, ctx context.Context, f *selftestFake, p selftestParams) (string, error) {
+	t.Helper()
+	setupSelftest(t, f, f)
 	var out bytes.Buffer
 	prev := keyholderSelftestOut
 	keyholderSelftestOut = func() io.Writer { return &out }

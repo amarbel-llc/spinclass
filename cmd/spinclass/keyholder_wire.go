@@ -48,13 +48,27 @@ var keyholderLauncherFn = realKeyholderLauncher
 // from a PATH a session can influence is the hole. Either path unset or not a
 // store program (CheckKeyholderToolPath) refuses, naming the setting.
 func realKeyholderLauncher(tools keyholder.Tools) (*keyholder.Launcher, error) {
+	var problems []keyholder.Problem
 	for _, p := range []struct{ name, path string }{{"fibby", tools.Fibby}, {"piggy", tools.Piggy}} {
 		if err := sweatfileio.CheckKeyholderToolPath(p.name, p.path); err != nil {
-			return nil, fmt.Errorf("the key holder is on but %w: a pair is never started from a name looked up on PATH\n    next: %s", err, validate.KeyholderProgramNext)
+			problems = append(problems, keyholder.Problem{
+				Name: p.name, What: err.Error() + ": a pair is never started from a name looked up on PATH",
+				Next: validate.KeyholderProgramNext,
+			})
 		}
+	}
+	if problems != nil {
+		return nil, &keyholderToolsError{problems}
 	}
 	return newKeyholderLauncher(tools), nil
 }
+
+// keyholderToolsError is a [keyholder] fibby or piggy that cannot be used. A
+// launch (the switch is on) reads it as the same refusal every precondition
+// gives; the self-test, which runs with the mode off too, takes the problems.
+type keyholderToolsError struct{ problems []keyholder.Problem }
+
+func (e *keyholderToolsError) Error() string { return keyholder.PreflightError(e.problems).Error() }
 
 // launcherForTools builds the real-system launcher for two absolute program
 // paths a person at a terminal named: the hidden `sc keyholder-pair` takes

@@ -73,11 +73,19 @@ func registerKeyholderSelftestCommand(app *command.App) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return fmt.Errorf("keyholder-selftest: invalid arguments: %w", err)
 			}
-			ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			ctx, stop := selftestContext(ctx)
 			defer stop()
 			return runKeyholderSelftest(ctx, p)
 		},
 	})
+}
+
+// selftestContext is cancelled, instead of the process dying with its pair up,
+// on every way a person or a pipe ends the command: Ctrl-C, a kill, a closed
+// terminal or dropped ssh (SIGHUP), and a reader that went away (`| head -1`:
+// with SIGPIPE caught the write only fails).
+func selftestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE)
 }
 
 // selftestLauncher builds the launcher under test: the named builds, else the
@@ -94,7 +102,18 @@ func selftestLauncher(p selftestParams) (*keyholder.Launcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	return keyholderLauncherFn(keyholder.Tools{Fibby: sw.Fibby, Piggy: sw.Piggy})
+	l, err := keyholderLauncherFn(keyholder.Tools{Fibby: sw.Fibby, Piggy: sw.Piggy})
+	var te *keyholderToolsError
+	if errors.As(err, &te) {
+		// The self-test runs with the mode off too: say what is wrong with the
+		// settings, not that a key holder is on.
+		whats := make([]string, len(te.problems))
+		for i, pr := range te.problems {
+			whats[i] = pr.What
+		}
+		return nil, errors.New(strings.Join(whats, "; "))
+	}
+	return l, err
 }
 
 func runKeyholderSelftest(ctx context.Context, p selftestParams) error {
@@ -151,23 +170,26 @@ func selftest(ctx context.Context, p selftestParams, res *selftestResult, say fu
 	}
 	say("ok preconditions")
 
+	cleanup := fmt.Sprintf("run `sc keyholder-stop %s` at a terminal", res.Session)
 	pair, err := l.Start(ctx, res.Session)
 	if err != nil {
 		// Start tears down what it made; look anyway.
 		fail("start", err, journal)
 		res.LeftOver = selftestLeftovers(context.WithoutCancel(ctx), l, res.Session)
+		if len(res.LeftOver) > 0 {
+			res.Next += "; also " + cleanup
+		}
 		return
 	}
 	res.AgentSock, res.AgentUnit, res.FibbyUnit = pair.AgentSock, pair.AgentUnit, pair.FibbyUnit
-	say("ok start (%s, %s)", pair.AgentUnit, pair.FibbyUnit)
 
-	// The pair is up: it is stopped on every way out, Ctrl-C included.
+	// The pair is up: it is stopped on every way out, Ctrl-C included. Deferred
+	// before anything more is written.
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		stopErr := l.Stop(stopCtx, res.Session)
 		res.LeftOver = selftestLeftovers(stopCtx, l, res.Session)
-		cleanup := fmt.Sprintf("run `sc keyholder-stop %s` at a terminal", res.Session)
 		switch {
 		case res.Step != "":
 			if stopErr != nil || len(res.LeftOver) > 0 {
@@ -182,6 +204,7 @@ func selftest(ctx context.Context, p selftestParams, res *selftestResult, say fu
 			res.Step, res.OK = "done", true
 		}
 	}()
+	say("ok start (%s, %s)", pair.AgentUnit, pair.FibbyUnit)
 
 	if err := selftestListsOneKey(ctx, l, pair); err != nil {
 		fail("list-key", err, journal)
