@@ -3396,6 +3396,22 @@ debug-review-package name base *context:
     done
     echo "package at $out: $(ls "$out/src" | wc -l) sources, $(ls "$out/tests" | wc -l) tests, $(ls "$out/docs" | wc -l) docs, $(ls "$out/context" | wc -l) context files, $(wc -l < "$out/full.diff") diff lines"
 
+# [debug] Documentation recipe for the vectors drift test against clown's recorded
+# digests: internal/0/bridge/vectors_drift_clown_test.go (build tag clownvectors)
+# compares sha256(testdata/vectors.json) and sha256(testdata/admission-vectors.json)
+# with bridgewire.VectorsSHA256 and peercheck.AdmissionVectorsSHA256 of the LOCKED
+# clown (clown rev ed73ff6 or later). Today's lock has no such constants, so the
+# tagged file does not compile and the untagged twin only SKIPs with the plain
+# message. godyn-test (`just debug-go-test`) takes no build tags, so this recipe
+# cannot run the tagged test; once the lock carries the constants, remove the
+# tag and the skip file (checklist issue "bridge: clown lock bump checklist"),
+# after which `just debug-go-test internal/0/bridge` runs it.
+#
+# print how the clown vectors drift test is switched on
+[group("debug")]
+debug-vectors-drift-clown:
+    @printf '%s\n' 'vectors drift test: off until the lock carries clown ed73ff6 or later (see the checklist issue); run today: just debug-go-test internal/0/bridge "" "-test.run VectorsDrift -test.v"'
+
 # [debug] The two real halves of the bridge against each other (FDR 0048, J-H1
 # start order): spinclass's real `spinclass serve` listener and clown's real shim
 # (`clown bridge-listen`, from a PRE-BUILT clown named by the clown_bin argument) in a real transient unit
