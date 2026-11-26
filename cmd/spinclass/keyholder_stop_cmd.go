@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,9 +25,26 @@ var keyholderStopJournal = func() string {
 }
 
 type keyholderStopParams struct {
-	All            bool `json:"all"`
-	DryRun         bool `json:"dry-run"`
-	IncludeUnowned bool `json:"including-unowned"`
+	All            bool   `json:"all"`
+	Session        string `json:"session"`
+	DryRun         bool   `json:"dry-run"`
+	IncludeUnowned bool   `json:"including-unowned"`
+}
+
+// keyholderStopSessionKey resolves the SESSION argument of `sc keyholder-stop
+// SESSION` to a session key: a session record's key when one is found (a
+// worktree name or a key), else the argument itself when it is written as a
+// key (<repo>/<branch>), so the pair of a session that was closed or whose
+// record is gone can still be stopped by its key.
+func keyholderStopSessionKey(arg string) (string, error) {
+	st, err := sessionKeyFind(arg)
+	if err == nil {
+		return st.Key(), nil
+	}
+	if strings.Contains(arg, "/") {
+		return arg, nil
+	}
+	return "", fmt.Errorf("keyholder-stop: no session %q (%w); give its key as <repo>/<branch> to stop a pair whose session record is gone", arg, err)
 }
 
 type keyholderJournalRecord struct {
@@ -74,8 +92,16 @@ func appendKeyholderJournal(rec keyholderJournalRecord) error {
 // history, marked stopped, so the next start of that session is announced as a
 // new key; the history of a pair whose session is gone goes with it.
 func runKeyholderStop(ctx context.Context, p keyholderStopParams) error {
-	if !p.All {
-		return errors.New("keyholder-stop: pass --all (it stops every key holder pair this state root recorded)")
+	if p.All == (p.Session != "") {
+		return errors.New("keyholder-stop: pass --all (it stops every key holder pair this state root recorded) or one SESSION (it stops that session's pair), not both and not neither")
+	}
+	wantHash := ""
+	if p.Session != "" {
+		key, err := keyholderStopSessionKey(p.Session)
+		if err != nil {
+			return err
+		}
+		wantHash = keyholder.Hash(key)
 	}
 	if !p.DryRun && !operatorHandleIsTerminal() {
 		return errors.New("keyholder-stop: stdin and stdout must both be terminals; ending sessions' keys is the operator's act and cannot be piped or driven by a program (--dry-run lists without stopping)")
@@ -97,9 +123,16 @@ func runKeyholderStop(ctx context.Context, p keyholderStopParams) error {
 		if (pr.KindOnly || pr.HistoryOnly) && !pr.Orphan {
 			continue
 		}
+		if wantHash != "" && pr.Hash != wantHash {
+			continue
+		}
 		pairs = append(pairs, pr)
 	}
 	if len(pairs) == 0 {
+		if wantHash != "" {
+			fmt.Fprintf(out, "no key holder pair for session %s\n", p.Session)
+			return nil
+		}
 		fmt.Fprintln(out, "no key holder pairs")
 		return nil
 	}
@@ -162,18 +195,24 @@ func runKeyholderStop(ctx context.Context, p keyholderStopParams) error {
 func registerKeyholderStopCommand(app *command.App) {
 	app.AddCommand(&command.Command{
 		Name:  "keyholder-stop",
-		Title: "Stop every key holder pair",
+		Title: "Stop one or every key holder pair",
 		Description: command.Description{
-			Short: "Stop every key holder pair this state root recorded, as the operator at a terminal (the remedy when [keyholder] mode is turned off). CLI-only.",
-			Long: "Turning [keyholder] mode off starts nothing for new sessions but leaves the pairs of existing sessions running until their sessions close; this stops them all: " +
+			Short: "Stop one session's key holder pair (SESSION) or every pair this state root recorded (--all), as the operator at a terminal. CLI-only.",
+			Long: "With SESSION: stops that one session's pair (both units seen inactive before its directories go), keeps its key history marked stopped so its next resume is announced as a new key, and leaves every other pair alone; it is the remedy `sc session-key` names when a holder is dead or its key changed, and `sc resume SESSION` starts the new pair when [keyholder] mode is on. The terminal, journal, NOT MINE and --including-unowned rules below apply to it as to --all. " +
+				"With --all: turning [keyholder] mode off starts nothing for new sessions but leaves the pairs of existing sessions running until their sessions close; this stops them all: " +
 				"both units of each pair are stopped and seen inactive before its directories are removed, and each stop is journalled to $XDG_STATE_HOME/spinclass/keyholder-journal.ndjson with actor tty. " +
 				"A session that lives on keeps its key history, marked stopped, so its next resume or restart is announced as a new key. " +
 				"Only pairs this state root recorded are stopped: units are per user but the state root follows XDG_STATE_HOME, so under another state home the account's pairs show as NOT MINE and are left running; --including-unowned stops them too, after listing them. " +
 				"--dry-run lists the pairs (and marks the ORPHANS, pairs whose session is gone, which `sc clean` stops, and the NOT MINE ones) without stopping anything and needs no terminal; a real stop refuses unless stdin and stdout are both terminals. " +
 				"It needs neither the trusted fibby and piggy paths nor the switch, so it works after the host's configuration is gone. A session whose pair was stopped keeps running without a holder; its next resume or restart starts a new pair and mints a new key if the switch is on.",
 		},
+		Examples: []command.Example{
+			{Description: "Stop one session's pair (the remedy `sc session-key` names when a holder's key changed); `sc resume` then starts a new pair and mints a new key", Command: "sc keyholder-stop repo/branch"},
+			{Description: "Stop every pair this state root recorded", Command: "sc keyholder-stop --all"},
+		},
 		Params: []command.Param{
-			{Name: "all", Type: command.Bool, Description: "Stop every pair this state root recorded (required)"},
+			{Name: "session", Type: command.String, Description: "Session key (<repo>/<branch>) or worktree name: stop only that session's pair (give --all instead for every pair)"},
+			{Name: "all", Type: command.Bool, Description: "Stop every pair this state root recorded (one of --all or SESSION is required)"},
 			{Name: "dry-run", Short: 'n', Type: command.Bool, Description: "List the pairs, the orphans and the NOT MINE ones without stopping anything"},
 			{Name: "including-unowned", Type: command.Bool, Description: "Also stop pairs whose units exist but this state root recorded nothing for (another XDG_STATE_HOME's pairs)"},
 		},
