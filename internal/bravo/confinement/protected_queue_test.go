@@ -24,7 +24,7 @@ func TestHostQueueStateIsAProtectedStateDir(t *testing.T) {
 		}
 	}
 	for _, bind := range []string{
-		state + "/spinclass/units",
+		state + "/spinclass/spawn-handshake",
 		state + "/spinclass/host-queue-other",
 	} {
 		if err := RefuseProtectedBinds(state, []string{bind}); err != nil {

@@ -19,7 +19,7 @@ func TestTokenPoolIsAProtectedStateDir(t *testing.T) {
 		}
 	}
 	for _, bind := range []string{
-		state + "/spinclass/units",
+		state + "/spinclass/spawn-handshake",
 		state + "/spinclass/token-pool-other",
 	} {
 		if err := RefuseProtectedBinds(state, []string{bind}); err != nil {
