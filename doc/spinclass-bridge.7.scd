@@ -656,7 +656,7 @@ condition lives.
   the hook sidecar open them O_NOFOLLOW and O_NONBLOCK, accept a regular file of
   at most 1 MiB, and treat anything else as an unreadable record. The tail
   reader of a spawn's *spawn.log* still does a plain read (a size cap would lose a
-  real log's tail); its issue is not filed yet.
+  real log's tail); it is tracked as #534.
 - The remaining low findings of the cut's review rounds are collected in #533.
 
 ## What this half serves, in plain words
