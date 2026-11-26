@@ -54,7 +54,7 @@ func flagValue(argv []string, flag string) string {
 	return ""
 }
 
-func (f *khFakeRunner) Start(_ context.Context, unit string, argv, _ []string) error {
+func (f *khFakeRunner) Start(_ context.Context, unit string, argv, _ []string, _ ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.started = append(f.started, unit)

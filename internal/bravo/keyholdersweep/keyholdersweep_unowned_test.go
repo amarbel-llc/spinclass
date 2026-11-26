@@ -22,7 +22,10 @@ func TestClassifyNeverCallsAnotherStateRootsUnitsAnOrphan(t *testing.T) {
 // state root records, as it does for a shell under another XDG_STATE_HOME.
 type accountUnits struct{ units []string }
 
-func (accountUnits) Start(context.Context, string, []string, []string) error { return nil }
+func (accountUnits) Start(context.Context, string, []string, []string, ...string) error {
+	return nil
+}
+
 func (a accountUnits) Active(_ context.Context, u string) (bool, error) {
 	for _, x := range a.units {
 		if x == u {

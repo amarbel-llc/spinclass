@@ -39,8 +39,9 @@ type Tools struct {
 // Runner is everything the launcher asks of the system.
 type Runner interface {
 	// Start runs argv as a transient user unit with env set, and returns once
-	// systemd has accepted it (not once the program is ready).
-	Start(ctx context.Context, unit string, argv, env []string) error
+	// systemd has accepted it (not once the program is ready). props are extra
+	// systemd unit properties in `Name=value` form (BindsTo=, After=).
+	Start(ctx context.Context, unit string, argv, env []string, props ...string) error
 	// Active reports whether the unit is running.
 	Active(ctx context.Context, unit string) (bool, error)
 	// Stop stops the unit; stopping a unit that is not loaded is not an error.
@@ -246,7 +247,12 @@ func (l *Launcher) launch(ctx context.Context, sessionKey string, ly layout) (Pa
 	_, _ = l.Run.Output(ctx, []string{l.Tools.Fibby, "ctl", "--socket", ly.ctl, "destroy", "Virtual PCD piggy fibby 00 00"}, nil)
 	if err := l.Run.Start(ctx, ly.agentUnit,
 		[]string{l.Tools.Piggy, "agent", "--holder", "--holder-fibby-ctl", ly.ctl, "--scope", Scope + "=any", "-a", ly.agent},
-		[]string{pcscEnv}); err != nil {
+		[]string{pcscEnv},
+		// The holder is bound to fibby: fibby going away stops the agent too, so a
+		// half-dead pair (an agent that still lists the key but can no longer sign)
+		// cannot exist. The other direction is not tied: the holder dying leaves
+		// fibby running, and the next start tears the pair down whole.
+		"BindsTo="+ly.fibbyUnit, "After="+ly.fibbyUnit); err != nil {
 		return Pair{}, fmt.Errorf("starting the holder: %w", err)
 	}
 	if err := l.waitSocket(ctx, ly.agent); err != nil {

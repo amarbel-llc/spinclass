@@ -30,8 +30,9 @@ func (r SystemdRunner) ctx(parent context.Context) (context.Context, context.Can
 }
 
 // Start runs argv as a transient service. --collect removes the unit when it
-// stops, so a stopped pair leaves no failed unit behind; Restart stays off.
-func (r SystemdRunner) Start(ctx context.Context, unit string, argv, env []string) error {
+// stops, so a stopped pair leaves no failed unit behind; Restart stays off. Each
+// of props (`BindsTo=unit`) is passed as a --property.
+func (r SystemdRunner) Start(ctx context.Context, unit string, argv, env []string, props ...string) error {
 	bin, err := r.runBin()
 	if err != nil {
 		return err
@@ -39,6 +40,9 @@ func (r SystemdRunner) Start(ctx context.Context, unit string, argv, env []strin
 	ctx, cancel := r.ctx(ctx)
 	defer cancel()
 	args := []string{"--user", "--quiet", "--collect", "--unit=" + unit, "--property=KillMode=control-group"}
+	for _, p := range props {
+		args = append(args, "--property="+p)
+	}
 	for _, e := range env {
 		args = append(args, "--setenv="+e)
 	}

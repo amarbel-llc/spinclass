@@ -24,7 +24,8 @@ type fakeRunner struct {
 	listeners []net.Listener
 	mintN     int
 	mintErr   error
-	stopStuck map[string]bool // units that stay active after Stop
+	stopStuck map[string]bool     // units that stay active after Stop
+	props     map[string][]string // the unit properties each unit was started with
 	t         *testing.T
 }
 
@@ -46,10 +47,14 @@ func (f *fakeRunner) sock(path string) {
 	f.listeners = append(f.listeners, l)
 }
 
-func (f *fakeRunner) Start(_ context.Context, unit string, argv, env []string) error {
+func (f *fakeRunner) Start(_ context.Context, unit string, argv, env []string, props ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "start "+unit)
+	if f.props == nil {
+		f.props = map[string][]string{}
+	}
+	f.props[unit] = props
 	f.active[unit] = true
 	switch {
 	case strings.Contains(unit, "fibby"):
