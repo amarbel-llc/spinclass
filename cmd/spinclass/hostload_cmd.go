@@ -106,8 +106,9 @@ type hostLoadView struct {
 	Queue *hostqueue.View `json:"queue,omitempty"`
 	// QueueBypass lists live serves whose binary has no host-queue code.
 	QueueBypass []QueueBypass `json:"queue_bypass,omitempty"`
-	// KeyholderStaleServe lists live serves whose binary predates the key holder
-	// (only while the key holder switch is on).
+	// KeyholderStaleServe lists live serves whose binary predates the key holder.
+	// It is a fact about binaries: listed whether the key holder switch is on or
+	// off, from any directory, so the operator can check it before switching on.
 	KeyholderStaleServe []QueueBypass `json:"keyholder_stale_serve,omitempty"`
 }
 

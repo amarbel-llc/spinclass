@@ -35,7 +35,7 @@ func formatKeyholderStaleServes(b []QueueBypass) string {
 		return ""
 	}
 	var s strings.Builder
-	fmt.Fprintf(&s, "\nKEY HOLDER STALE SERVE: %d live session(s) run a spinclass serve that predates the key holder: once the key holder is switched on, the workers such a serve spawns get no holder and keep the operator's agent; restart them before switching it on", len(b))
+	fmt.Fprintf(&s, "\nKEY HOLDER STALE SERVE: %d live session(s) run a spinclass serve that predates the key holder: once the key holder is switched on, the workers such a serve spawns get no holder and keep the operator's agent; restart them before switching it on (an operator step: with sc restart or restart-child-session, or close and respawn; nothing to do while the key holder stays off)", len(b))
 	for _, x := range b {
 		name := x.Session
 		if name == "" {
