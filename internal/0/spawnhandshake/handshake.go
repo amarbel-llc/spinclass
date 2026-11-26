@@ -13,10 +13,43 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
+
+// maxHelloSize bounds a hello file: a hello is a few hundred bytes, and the file
+// is one the worker wrote.
+const maxHelloSize = 1 << 20
+
+// readHello reads a hello file the way a frontend must read one a worker wrote:
+// no symlink at the final element (O_NOFOLLOW), no blocking on a FIFO
+// (O_NONBLOCK), a regular file only, and at most maxHelloSize bytes. (The same
+// rule as safeio.ReadRegular, which this level-0 package cannot import.)
+func readHello(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() || fi.Size() > maxHelloSize {
+		return nil, fmt.Errorf("%s is not a regular file of at most %d bytes (mode %s, size %d): refusing to read it", path, maxHelloSize, fi.Mode().Type(), fi.Size())
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxHelloSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxHelloSize {
+		return nil, fmt.Errorf("%s grew past %d bytes while being read: refusing it", path, maxHelloSize)
+	}
+	return data, nil
+}
 
 // pollInterval is how often WaitForHello re-checks the handshake file between
 // the immediate first check and the deadline.
@@ -124,6 +157,28 @@ func SendHello(worker, driver, poshSessionID string) error {
 	return nil
 }
 
+// maxPoshSessionIDLen bounds a reported posh session id; real ones are uuids.
+const maxPoshSessionIDLen = 128
+
+// ValidPoshSessionID says id is a plain session id: ASCII letters, digits, '-',
+// '_' and '.', one to maxPoshSessionIDLen long, and not opening with '-' (which
+// a command line would read as an option). Anything else, a newline, a space, a
+// shell metacharacter, is refused.
+func ValidPoshSessionID(id string) bool {
+	if id == "" || len(id) > maxPoshSessionIDLen || id[0] == '-' {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // WaitForHello blocks until the worker's hello (newer than since) appears for
 // this driver, or deadline elapses (the error names the deadline and the worker
 // key). Polls every pollInterval; the read is non-destructive, so a slow caller
@@ -139,7 +194,7 @@ func WaitForHello(driver, worker string, since time.Time, deadline time.Duration
 // shared one.
 func WaitForHelloIn(d, driver, worker string, since time.Time, deadline time.Duration) (string, error) {
 	arrived := func() (bool, string, error) {
-		data, err := os.ReadFile(pairPath(d, worker, driver))
+		data, err := readHello(pairPath(d, worker, driver))
 		if err != nil {
 			if os.IsNotExist(err) {
 				return false, "", nil
@@ -155,7 +210,14 @@ func WaitForHelloIn(d, driver, worker string, since time.Time, deadline time.Dur
 		if !h.SentAt.After(since) {
 			return false, "", nil
 		}
-		return true, h.PoshSessionID, nil
+		// The id comes from a file the worker wrote and goes into the operator's
+		// spawn-window argv: one that is not a plain id reads as "none reported" (the
+		// driver skips the auto-attach), never as text for a command line (R3-L3).
+		id := h.PoshSessionID
+		if !ValidPoshSessionID(id) {
+			id = ""
+		}
+		return true, id, nil
 	}
 
 	// Check once before the first tick so an already-arrived hello does not

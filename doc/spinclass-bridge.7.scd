@@ -652,6 +652,11 @@ condition lives.
   trusts (the cgroup file, the unit record, the principal mapping, the state
   file); the checks stop other users and other units, not a process of the same
   account outside them.
+- Host-side reads of files a worker can replace: the session record loaders and
+  the hook sidecar open them O_NOFOLLOW and O_NONBLOCK, accept a regular file of
+  at most 1 MiB, and treat anything else as an unreadable record. The tail
+  reader of a spawn's *spawn.log* still does a plain read (a size cap would lose a
+  real log's tail); its issue is not filed yet.
 - The remaining low findings of the cut's review rounds are collected in #533.
 
 ## What this half serves, in plain words
@@ -694,8 +699,12 @@ when a unit record or the principal mapping says so, or when a record that
 exists cannot be read or parsed (evidence exists, its content is unknown, so it
 is refused, with the state named). With NO evidence at all (no record, no
 launch, an unresolved principal or state directory, a serve with no record of
-its own) the call behaves as before this change. The gated tools
-(*grit_\**, *perms*) are not part of this rule and still fail closed. The
+its own) the call behaves as before this change. The gated tools (*spawn*,
+*merge*, *grit_\**, *perms*, and the rest of the gated set) keep their fail-closed
+classification, and ALSO read the confined-launch evidence: a launch spec or
+unit record spinclass wrote for the session's worktree, or one that cannot be
+read, refuses them, so the window between a confined launch and clown's unit
+record is closed for them as for the three verbs above. The
 inputs are all host side: the serve's own cgroup and environment (set by the
 frontend that started it, not by a call), and files under the frontend state
 directory (the session records, the unit records and specs, the principal
