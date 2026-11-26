@@ -3495,8 +3495,9 @@ debug-bridge-halves-proof clown_bin:
         || { fail "bridge-seam-write result failed: $(head -c 200 "$base/wres.out")"; return 1; }
       # The principal mapping: spinclass has no CLI that runs its confined-launch writer
       # (RecordPrincipalFromUnit runs inside `sc spawn`), so the recipe writes this one line;
+      # The line's template lives in ONE file the test also reads, and
       # TestRecipeMappingLineIsWhatTheRealWriterWrites pins it to that writer's output.
-      printf '{"version":1,"principal":"%s","session_key":"%s","worktree":"%s","unit":"%s"}\n' "$principal" "$key" "$wt" "$1" >"$map"
+      printf "$(cat internal/bravo/confinement/testdata/halves-mapping-line.json)\n" "$principal" "$key" "$wt" "$1" >"$map"
       # claude's SessionStart hook, run for real (it stamps the principal into the session record).
       ( cd "$wt" && printf '{"hook_event_name":"SessionStart","session_id":"halves","source":"startup","cwd":"%s"}' "$wt" | env CLOWN_SESSION_ID="$principal" "$sc" hook >"$base/hook.out" 2>&1 ) || say "SessionStart hook exited nonzero: $(head -c 200 "$base/hook.out")"
     }

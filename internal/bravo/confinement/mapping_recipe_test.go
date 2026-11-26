@@ -3,21 +3,42 @@
 package confinement
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// recipeMappingLine is the line `just debug-bridge-halves-proof` writes as the
-// principal mapping: spinclass has no CLI that runs its confined-launch writer
-// (RecordPrincipalFromUnit runs inside `sc spawn`), so the recipe cannot call it.
-// This test keeps that line equal, once decoded, to what the real writer writes
-// from a unit record, so a change to the mapping shape fails here and not in a
-// live run.
-const recipeMappingLine = `{"version":1,"principal":"%s","session_key":"%s","worktree":"%s","unit":"%s"}` + "\n"
+// The line `just debug-bridge-halves-proof` writes as the principal mapping is a
+// printf template in testdata/halves-mapping-line.json: the recipe reads that
+// file, and this test reads the same file, so there is ONE source for both.
+// Spinclass has no CLI that runs its confined-launch writer
+// (RecordPrincipalFromUnit runs inside `sc spawn`), so the recipe cannot call
+// it; this test keeps the template equal, once decoded, to what the real writer
+// writes from a unit record, so a change to the mapping shape fails here and not
+// in a live run.
+const recipeMappingTemplatePath = "testdata/halves-mapping-line.json"
+
+func recipeMappingLine(t *testing.T, principal, key, wt, unit string) []byte {
+	t.Helper()
+	tmpl, err := os.ReadFile(recipeMappingTemplatePath)
+	if err != nil {
+		t.Fatalf("the recipe's mapping template: %v", err)
+	}
+	return []byte(fmt.Sprintf(string(bytes.TrimSuffix(tmpl, []byte("\n"))), principal, key, wt, unit) + "\n")
+}
+
+// strictMapping decodes a mapping and refuses unknown fields, so a field the
+// real struct dropped or renamed cannot hide in the template.
+func strictMapping(b []byte) (PrincipalMapping, error) {
+	var m PrincipalMapping
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&m)
+	return m, err
+}
 
 func TestRecipeMappingLineIsWhatTheRealWriterWrites(t *testing.T) {
 	dir := t.TempDir()
@@ -47,28 +68,29 @@ func TestRecipeMappingLineIsWhatTheRealWriterWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fromReal, fromRecipe PrincipalMapping
-	if err := json.Unmarshal(real, &fromReal); err != nil {
-		t.Fatalf("the real mapping does not parse: %v", err)
+	fromReal, err := strictMapping(real)
+	if err != nil {
+		t.Fatalf("the real mapping does not decode strictly: %v", err)
 	}
-	if err := json.Unmarshal([]byte(fmt.Sprintf(recipeMappingLine, principal, key, wt, unit)), &fromRecipe); err != nil {
-		t.Fatalf("the recipe's mapping line does not parse: %v", err)
+	line := recipeMappingLine(t, principal, key, wt, unit)
+	fromRecipe, err := strictMapping(line)
+	if err != nil {
+		t.Fatalf("the recipe's mapping line %q does not decode strictly into the real struct: %v", line, err)
 	}
 	if fromReal != fromRecipe {
 		t.Errorf("the recipe writes %+v, the real writer writes %+v", fromRecipe, fromReal)
 	}
+	// Every field of the real struct must be present in the line: a template that
+	// leaves one out decodes to its zero value and would otherwise slip through
+	// when the real writer's value is also empty.
+	if fromRecipe.Version == 0 || fromRecipe.Principal == "" || fromRecipe.SessionKey == "" || fromRecipe.Worktree == "" || fromRecipe.Unit == "" {
+		t.Errorf("the recipe's mapping line leaves a field empty: %+v", fromRecipe)
+	}
 	// And the file the recipe writes must load through the real reader.
-	if err := os.WriteFile(PrincipalMappingPath(dir, "recipe-p"), []byte(fmt.Sprintf(recipeMappingLine, "recipe-p", key, wt, unit)), 0o600); err != nil {
+	if err := os.WriteFile(PrincipalMappingPath(dir, "recipe-p"), recipeMappingLine(t, "recipe-p", key, wt, unit), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadPrincipalMapping(Host{}, dir, "recipe-p"); err != nil {
 		t.Errorf("the recipe's mapping line is refused by the real reader: %v", err)
-	}
-	// The recipe text still carries this exact line (skipped when the justfile is not in the test's tree).
-	if jf, err := os.ReadFile(filepath.Join("..", "..", "..", "justfile")); err == nil {
-		want := strings.TrimSuffix(recipeMappingLine, "\n")
-		if !strings.Contains(string(jf), "printf '"+want+`\n' "$principal"`) {
-			t.Errorf("the recipe no longer writes the mapping line this test pins: %q", want)
-		}
 	}
 }
