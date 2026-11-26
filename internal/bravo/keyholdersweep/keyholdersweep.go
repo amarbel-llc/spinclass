@@ -57,6 +57,8 @@ func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duratio
 			p.Why = "session " + f.Session + " is live"
 		case f.KindOnly && liveHashes[f.Hash]:
 			p.Why = "the kind record of a live session (a driver has no pair)"
+		case f.HistoryOnly && liveHashes[f.Hash]:
+			p.Why = "the key history of a live session whose pair is stopped: kept on purpose, so its next start is announced as a new key"
 		case liveHashes[f.Hash]:
 			// A session record maps to this hash: whatever is left of its pair (a lock
 			// file, units without a directory, a failed re-mint) the history and kind
@@ -68,6 +70,8 @@ func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duratio
 			p.Orphan, p.Why = true, "a leftover lock file with no pair (removed unless a process holds it)"
 		case f.KindOnly:
 			p.Orphan, p.Why = true, "a stray kind record with no pair and no key history (removed unless a process holds the lock)"
+		case f.HistoryOnly:
+			p.Orphan, p.Why = true, "a key history with no pair and no session record (a session removed without `sc close`; removed unless a process holds the lock)"
 		case f.Dir == "":
 			p.Orphan, p.Why = true, "units with no directory and no session"
 		case f.Age < minAge:

@@ -47,6 +47,15 @@ type Found struct {
 	// stop that did not end the history (or a session removed by something other
 	// than `sc close`) leaves it behind; nothing reads it again.
 	KindOnly bool
+	// HistoryOnly is true when all that is left of the pair is its key history
+	// (`<hash>.last.json`, and perhaps its `<hash>.kind` beside it): no directory,
+	// no loaded unit, no lock file. A stop that kept the history on purpose (the
+	// operator's `sc keyholder-stop --all`) leaves exactly this, and so does a
+	// session removed by something other than `sc close` (`sc clean` reaping its
+	// worktree). While a session record maps to the hash the history is that
+	// session's and stays; with none, nothing will ever read it, and left alone it
+	// would tell a later session with the same key that its first key REPLACED one.
+	HistoryOnly bool
 	// Unowned is true when systemd lists units for this hash but THIS state root
 	// recorded nothing for it: no directory, no key history, no lock file. Units
 	// are per user and the state root follows the caller's XDG_STATE_HOME, so a
@@ -159,6 +168,23 @@ func (l *Launcher) Find(ctx context.Context) ([]Found, error) {
 			f.Age = now.Sub(fi.ModTime())
 		}
 	}
+	// A `<hash>.last.json` with no directory, no unit and no lock is a key history
+	// with nothing left of its pair (a kind record beside it goes with it).
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".last.json") || !hashRE.MatchString(strings.TrimSuffix(name, ".last.json")) {
+			continue
+		}
+		h := strings.TrimSuffix(name, ".last.json")
+		if _, known := byHash[h]; known {
+			continue
+		}
+		f := get(h)
+		f.HistoryOnly = true
+		if fi, err := e.Info(); err == nil {
+			f.Age = now.Sub(fi.ModTime())
+		}
+	}
 	out := make([]Found, 0, len(byHash))
 	for h, f := range byHash {
 		sort.Strings(f.Units)
@@ -212,8 +238,8 @@ func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions)
 		name = "pair " + f.Hash
 	}
 	wait := lockWait
-	if f.LockOnly || f.KindOnly {
-		wait = 0 // a lock file or a kind record with no pair: if anyone holds the lock, it is not ours to remove
+	if f.LockOnly || f.KindOnly || f.HistoryOnly {
+		wait = 0 // a lock file, a kind record or a history with no pair: if anyone holds the lock, it is not ours to remove
 	}
 	h, err := l.acquire(ctx, f.Hash, name, wait)
 	if errors.Is(err, errLockHeld) {
@@ -222,7 +248,7 @@ func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions)
 	if err != nil {
 		return err
 	}
-	if f.LockOnly || f.KindOnly {
+	if f.LockOnly || f.KindOnly || f.HistoryOnly {
 		// Found said there was no directory; a launch may have made one since. Look
 		// again under the lock: a start that raced this sweep owns what it made.
 		if _, serr := os.Lstat(filepath.Join(l.Base, f.Hash)); serr == nil {

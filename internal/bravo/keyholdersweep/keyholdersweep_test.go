@@ -92,6 +92,24 @@ func TestClassifyNeverSweepsWhatIsLeftOfALiveSessionsPair(t *testing.T) {
 	}
 }
 
+// A key history with nothing left of its pair is kept while a session record maps
+// to it (an operator stop kept it on purpose: the next start is announced) and is
+// swept when none does (`sc clean` reaped the worktree and nothing ever read it).
+func TestClassifyKeepsAHistoryOnlyOfALiveSessionAndSweepsTheRest(t *testing.T) {
+	live := map[string]bool{"s/stopped": true}
+	found := []keyholder.Found{
+		{Hash: keyholder.Hash("s/stopped"), HistoryOnly: true, Age: time.Hour},
+		{Hash: keyholder.Hash("s/reaped"), HistoryOnly: true, Age: time.Second},
+	}
+	got := Classify(found, live, time.Hour)
+	if got[0].Orphan || !strings.Contains(got[0].Why, "live session") {
+		t.Errorf("a live session's history: %+v, want it kept", got[0])
+	}
+	if !got[1].Orphan || !strings.Contains(got[1].Why, "key history") {
+		t.Errorf("a history no session record maps to: %+v, want an orphan", got[1])
+	}
+}
+
 func TestDescribeNamesTheHashTheSessionAndTheState(t *testing.T) {
 	line := Describe(Pair{Found: keyholder.Found{Hash: "0123456789abcdef", Running: true}, Why: "x"})
 	for _, want := range []string{"0123456789abcdef", "session=unknown", "running"} {
