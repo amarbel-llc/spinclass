@@ -3531,6 +3531,19 @@ debug-bridge-halves-proof clown_bin seam_bin:
     write_record_and_mapping "$ua"
     r="$(rpc "$base/epa.sock" "$init" "$who")"
     case "$r" in *"$key"*'"result"'*|*'"result"'*"$key"*) pass "A: whoami through the shim answers for $key after the record and mapping";; *) fail "A: whoami after the mapping got: $r";; esac
+    # Bridged ESCALATION REFUSALS, from the admitted unit's shim (its endpoint dials the bridge from
+    # inside the unit's cgroup): a tool outside the five allow-listed ones is -32602, a refused
+    # argument of an allowed tool is -32001 `refused: ...`, and no restart request is queued.
+    tool_call() { printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$2" "$3"; }
+    rpc_calls() { local sock="$1"; shift; printf '%s\n' "$@" | timeout 10 socat -t3 - UNIX-CONNECT:"$sock" 2>/dev/null; }
+    restart_marks() { { grep -rl '"restart_request"' "$XDG_STATE_HOME/spinclass/records" "$wt/.spinclass" 2>/dev/null || true; } | wc -l | tr -d ' '; }
+    marks_before="$(restart_marks)"
+    r="$(rpc_calls "$base/epa.sock" "$init" "$(tool_call 3 stop-this-session '{}')")"
+    case "$r" in *'-32602'*) pass "A: a tool outside the five (stop-this-session) over the bridge is -32602: $(printf %s "$r" | tail -1 | cut -c1-140)";; *) fail "A: stop-this-session over the bridge got: $r";; esac
+    r="$(rpc_calls "$base/epa.sock" "$init" "$(tool_call 4 restart-this-session '{"force":true,"reason":"halves proof"}')")"
+    case "$r" in *'-32001'*'refused: '*) pass "A: restart-this-session with force over the bridge is -32001 refused: $(printf %s "$r" | tail -1 | cut -c1-140)";; *) fail "A: restart-this-session force got: $r";; esac
+    marks_after="$(restart_marks)"
+    if [ "$marks_before" = "$marks_after" ] && [ "$marks_after" = 0 ]; then pass "A: no restart request was queued by the refused calls (records carry no restart_request)"; else fail "A: restart_request marks before=$marks_before after=$marks_after"; fi
     r="$(raw "$base/ba/bridge.sock" 'BRIDGE/1 control')"
     case "$r" in "ERR refused"*) pass "A: a foreign caller (a process outside the unit) gets ERR refused";; *) fail "A: a foreign caller got: $r";; esac
     rm -f "$base/cga"
