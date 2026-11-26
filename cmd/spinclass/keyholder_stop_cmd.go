@@ -90,7 +90,14 @@ func runKeyholderStop(ctx context.Context, p keyholderStopParams) error {
 	if err != nil {
 		return fmt.Errorf("keyholder-stop: %w", err)
 	}
-	pairs := keyholdersweep.Classify(found, live, keyholdersweep.OrphanMinAge)
+	var pairs []keyholdersweep.Pair
+	for _, pr := range keyholdersweep.Classify(found, live, keyholdersweep.OrphanMinAge) {
+		// The kind record of a live driver is no pair: it has nothing to stop.
+		if pr.KindOnly && !pr.Orphan {
+			continue
+		}
+		pairs = append(pairs, pr)
+	}
 	if len(pairs) == 0 {
 		fmt.Fprintln(out, "no key holder pairs")
 		return nil

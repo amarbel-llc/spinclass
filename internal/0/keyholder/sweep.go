@@ -42,6 +42,11 @@ type Found struct {
 	// file: no directory, no loaded unit. StopFound removes such a file only if
 	// no process holds the lock, and never waits for one.
 	LockOnly bool
+	// KindOnly is true when all that is left of the pair is its `<hash>.kind`
+	// record: no directory, no loaded unit, no lock file and no key history. A
+	// stop that did not end the history (or a session removed by something other
+	// than `sc close`) leaves it behind; nothing reads it again.
+	KindOnly bool
 	// Unowned is true when systemd lists units for this hash but THIS state root
 	// recorded nothing for it: no directory, no key history, no lock file. Units
 	// are per user and the state root follows the caller's XDG_STATE_HOME, so a
@@ -130,6 +135,30 @@ func (l *Launcher) Find(ctx context.Context) ([]Found, error) {
 			f.Age = now.Sub(fi.ModTime())
 		}
 	}
+	// A `<hash>.kind` with nothing else under its hash (no directory, no unit, no
+	// lock) and no key history is a stray record. One with a key history stays: a
+	// stopped session keeps both on purpose.
+	hasHistory := map[string]bool{}
+	for _, e := range entries {
+		if n := e.Name(); strings.HasSuffix(n, ".last.json") && hashRE.MatchString(strings.TrimSuffix(n, ".last.json")) {
+			hasHistory[strings.TrimSuffix(n, ".last.json")] = true
+		}
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".kind") || !hashRE.MatchString(strings.TrimSuffix(name, ".kind")) {
+			continue
+		}
+		h := strings.TrimSuffix(name, ".kind")
+		if _, known := byHash[h]; known || hasHistory[h] {
+			continue
+		}
+		f := get(h)
+		f.KindOnly = true
+		if fi, err := e.Info(); err == nil {
+			f.Age = now.Sub(fi.ModTime())
+		}
+	}
 	out := make([]Found, 0, len(byHash))
 	for h, f := range byHash {
 		sort.Strings(f.Units)
@@ -183,8 +212,8 @@ func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions)
 		name = "pair " + f.Hash
 	}
 	wait := lockWait
-	if f.LockOnly {
-		wait = 0 // a lock file with no pair: if anyone holds it, it is not ours to remove
+	if f.LockOnly || f.KindOnly {
+		wait = 0 // a lock file or a kind record with no pair: if anyone holds the lock, it is not ours to remove
 	}
 	h, err := l.acquire(ctx, f.Hash, name, wait)
 	if errors.Is(err, errLockHeld) {

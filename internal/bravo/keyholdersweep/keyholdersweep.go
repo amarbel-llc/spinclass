@@ -39,6 +39,14 @@ type Pair struct {
 // this state root's at all. live is the set of session keys with a live (not
 // closed) record.
 func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duration) []Pair {
+	// A driver has no pair and no record under its hash but its kind file, so a
+	// kind-only entry is told from a stray one by the live sessions' hashes.
+	liveHashes := make(map[string]bool, len(live))
+	for k, ok := range live {
+		if ok {
+			liveHashes[keyholder.Hash(k)] = true
+		}
+	}
 	out := make([]Pair, 0, len(found))
 	for _, f := range found {
 		p := Pair{Found: f}
@@ -47,8 +55,12 @@ func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duratio
 			p.Why = "units this state root recorded nothing for (another XDG_STATE_HOME?): not mine, never stopped by a sweep"
 		case f.Session != "" && live[f.Session]:
 			p.Why = "session " + f.Session + " is live"
+		case f.KindOnly && liveHashes[f.Hash]:
+			p.Why = "the kind record of a live session (a driver has no pair)"
 		case f.LockOnly:
 			p.Orphan, p.Why = true, "a leftover lock file with no pair (removed unless a process holds it)"
+		case f.KindOnly:
+			p.Orphan, p.Why = true, "a stray kind record with no pair and no key history (removed unless a process holds the lock)"
 		case f.Dir == "":
 			p.Orphan, p.Why = true, "units with no directory and no session"
 		case f.Age < minAge:
