@@ -44,6 +44,12 @@ type UnitRecord struct {
 	// written by that (frontend) clown. claude's own environment never carries
 	// it (clown#136), so this record is where a unit's principal is read.
 	Principal string `json:"principal"`
+	// Bridge is what clown says of the session's bridge when the launch spec
+	// asked for one: `recorded` (clown wrote the cgroup file and the bridge was
+	// bound) or `off: <reason>` (it was asked for and is not there). Absent: the
+	// spec did not ask, or a clown that predates the field. Never trusted for
+	// anything but what the operator is told.
+	Bridge string `json:"bridge,omitempty"`
 	// Harness optionally names (or gives the path of) the process clown exec'd
 	// in the unit (clown FDR 0021). F11 searches for it outside every unit.
 	Harness string `json:"harness"`

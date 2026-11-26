@@ -106,7 +106,7 @@ func productionHealthDeps() healthDeps {
 			j, err := job.Read(st.WorktreePath)
 			return err == nil && j.Status == job.StatusRunning
 		},
-		Bridge: func(st *session.State) string { return bridgeStateNote(stateHome, st.Principal, true) },
+		Bridge: func(st *session.State) string { return bridgeSessionNote(st, stateHome, true) },
 	}
 }
 

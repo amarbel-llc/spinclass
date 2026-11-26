@@ -1,13 +1,12 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // bridgeStateNote reads a session's bridge state file under stateHome (the XDG
@@ -37,15 +36,14 @@ func bridgeStateNote(stateHome, principal string, withListening bool) string {
 // listBridgeNote is what `sc list` says about a session's bridge: only a
 // bridge that is down. A seam for tests.
 var listBridgeNote = func(principal string) string {
-	stateHome := os.Getenv("XDG_STATE_HOME")
-	if !filepath.IsAbs(stateHome) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		stateHome = filepath.Join(home, ".local", "state")
-	}
-	return bridgeStateNote(stateHome, principal, false)
+	return bridgeStateNote(defaultBridgeStateHome(), principal, false)
+}
+
+// listBridgeSessionNote is the bridge words of one `sc list` row: the serve's
+// own report of a bridge that is down, then a launch that asked for a bridge
+// it does not have. A seam for tests.
+var listBridgeSessionNote = func(st *session.State) string {
+	return joinNotes(listBridgeNote(st.Principal), bridgeAskedNote(st, defaultBridgeStateHome()))
 }
 
 // serveBridgeCell is the plain table's SERVE cell with the session's bridge

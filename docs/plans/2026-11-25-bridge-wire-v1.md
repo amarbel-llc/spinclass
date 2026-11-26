@@ -301,6 +301,34 @@ cgroup file written is clown's to say; the live state ("listening", "dead",
 "asked for, not listening") is the frontend's to show (state file, `sc list`,
 session-health).
 
+**What the frontend shows, and from what.**
+
+- *The state file is believed only while its writer lives.* The serve writes
+  `<state>/spinclass/bridge/<principal>.state.json` with its pid and the start
+  ticks of that process (field 22 of its `/proc` stat, so a reused pid is not
+  taken for it) and a heartbeat. A live serve refreshes the heartbeat at most
+  once a minute: the listener's 2 s cadence only looks at the clock, and the
+  file is rewritten when a minute has passed. A reader (`sc list`,
+  session-health) takes a `listening` state as the last word of a serve that is
+  gone when the pid is gone or belongs to another process, or the heartbeat is
+  older than three minutes, and says `bridge DOWN: the serve that owned it is
+  gone`. A state that says down stands as written; a file with no pid (written
+  before this) is taken as it says. A serve that stopped cleanly removes the
+  file.
+- *"Asked for, not running."* `sc list` and session-health read the stored launch
+  spec's `bridge` field and clown's result (the unit record) `bridge` field
+  (`recorded`, `off: <reason>`, or absent) and say `bridge: asked for
+  (offered|required), not running: <reason>` for a live session whose spec asked
+  for the bridge when the result says `off: <reason>`, or says `recorded` and the
+  serve has written no state file. Absent (a clown that predates the field), a
+  spec that did not ask, and a session that is not running, say nothing: a
+  bridge that is down is the state file's to say. The reason is clown's text,
+  bounded to control-free words; it is data, not an instruction.
+- *Limits:* the state file is named by the serve's principal, which a confined
+  session's record carries only after its hello, so a launch that never said
+  hello shows no state note by principal (the result-based note still shows); a
+  count of `off` results is not kept, because only a reader sees them.
+
 Inside the unit: `CLOWN_BRIDGE_SOCKET` is the socket's path (the same path as
 outside), the shim's flag is `--bridge SOCK`, and clown advertises the result
 capability `bridge-v1` only once the cgroup file was written. A view unit refuses

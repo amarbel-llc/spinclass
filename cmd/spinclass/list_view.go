@@ -401,7 +401,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			mesa.Text(sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now)),
 			mesa.Text(s.Profile),
 		}
-		bridgeNote := listBridgeNote(s.Principal)
+		bridgeNote := listBridgeSessionNote(s)
 		if !tty {
 			cells = append(cells, serveBridgeCell(serves[s.Principal], own, bridgeNote))
 		}
