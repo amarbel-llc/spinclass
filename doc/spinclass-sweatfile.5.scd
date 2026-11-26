@@ -1668,7 +1668,14 @@ operator-only flip that needs no deploy).
 	in *sc list* and *session-health*); *clearing leftovers of an unfinished
 	start for <session>* after a launch that died half way; *stopped the pair for
 	<session>* when a session's pair is stopped, and *stopped the pair <hash>
-	(<session>)* for one swept by *sc clean* or *sc keyholder-stop*.
+	(<session>)* for one swept by *sc clean* or *sc keyholder-stop*. A session
+	key, a fingerprint or a key line that a pair's record or key history carries
+	is a file a session of the account can write, so it is printed (in these log
+	lines, in *sc list*, *session-health*, *sc keyholder-stop*, *sc session-key*
+	and the journal) only in a safe form: a key made of the usual session-key
+	characters and under 200 bytes as it is, anything else quoted and escaped,
+	cut short and followed by *(record altered)*, so it cannot end a line,
+	start one, or move the cursor.
 
 	*A changed key.* A pair that is lost (the units gone after a reboot or an
 	operator's stop, the holder restarted) mints a NEW key: keys live only in fibby's memory
