@@ -27,6 +27,7 @@ type selftestFake struct {
 	priv      ed25519.PrivateKey
 	listed    string // what ssh-add -L prints; "" = the minted key
 	badSign   bool
+	commitErr error
 	onSign    func()
 	activeErr error
 }
@@ -89,6 +90,9 @@ func setupSelftest(t *testing.T, f *selftestFake, run keyholder.Runner) {
 		return l, err
 	}
 	t.Cleanup(keyholder.OverrideSSHPins("/pin/ssh-add", "/pin/ssh-keygen"))
+	prev := selftestSignedCommit
+	t.Cleanup(func() { selftestSignedCommit = prev })
+	selftestSignedCommit = func(context.Context, *keyholder.Launcher, keyholder.Pair) error { return f.commitErr }
 }
 
 // runSelftest runs the command against f and returns its stdout and error.
@@ -139,6 +143,7 @@ func TestKeyholderSelftestNamesTheFailedStepAndStopsThePair(t *testing.T) {
 		{"start", func(f *selftestFake) { f.mintErr = errors.New("no card") }},
 		{"list-key", func(f *selftestFake) { f.listed = "ssh-ed25519 AAAAC3NzaOTHERKEY other" }},
 		{"sign", func(f *selftestFake) { f.badSign = true }},
+		{"commit", func(f *selftestFake) { f.commitErr = errors.New("git commit: no signature") }},
 	}
 	for _, c := range cases {
 		t.Run(c.step, func(t *testing.T) {

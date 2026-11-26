@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -56,7 +57,7 @@ func registerKeyholderSelftestCommand(app *command.App) {
 		Title: "Start, use and stop one throwaway key holder",
 		Description: command.Description{
 			Short: "Prove a key holder can start on this host: start one for a throwaway key, sign with it, stop it, check nothing is left. CLI-only; no terminal needed.",
-			Long: "Checks what a pair needs (the same checks `sc validate` and a spawn make), starts a real pair for a throwaway session name, checks the holder lists exactly its one key, makes one signature and verifies it, stops the pair and checks that no unit and no directory is left. " +
+			Long: "Checks what a pair needs (the same checks `sc validate` and a spawn make), starts a real pair for a throwaway session name, checks the holder lists exactly its one key, makes one signature and verifies it, makes one signed git commit with the settings a worker gets and verifies it, stops the pair and checks that no unit and no directory is left. " +
 				"It uses [keyholder] fibby and piggy as the trusted sweatfiles above the current directory set them, whether or not the mode is on; --fibby and --piggy (both) name other builds. It touches no session and does not read or change the switch beyond that. " +
 				"Exit 0 and the last stdout line `keyholder-selftest: OK ...`, or exit 1 with `keyholder-selftest: FAILED at <step>: ...` as the last line and a `next:` line above it saying what to do. With --json, stdout is one JSON object {ok, step, error, next, session, agent_sock, agent_unit, fibby_unit, left_over}. Ctrl-C stops the pair before it exits.",
 		},
@@ -216,9 +217,59 @@ func selftest(ctx context.Context, p selftestParams, res *selftestResult, say fu
 		return
 	}
 	say("ok signed and verified")
+	if err := selftestSignedCommit(ctx, l, pair); err != nil {
+		fail("commit", err, journal)
+		return
+	}
+	say("ok made a signed git commit as a worker would, and verified it")
 	if err := ctx.Err(); err != nil {
 		fail("interrupted", err, "run `sc keyholder-selftest` again")
 	}
+}
+
+// selftestSignedCommit is the self-test's commit step; tests, whose fake holder
+// cannot sign for git, replace it.
+var selftestSignedCommit = signedCommitWithHolder
+
+// signedCommitWithHolder makes a plain `git commit` in a throwaway repository,
+// with the settings a holder worker's launch gives it (the same writer), and
+// verifies it. Nothing of the operator's git configuration is read.
+func signedCommitWithHolder(ctx context.Context, l *keyholder.Launcher, pair keyholder.Pair) error {
+	keygen, err := keyholder.SSHKeygenPin()
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "keyholder-selftest-git-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	env := []string{
+		"PATH=" + os.Getenv("PATH"), "HOME=" + dir,
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=spinclass", "GIT_AUTHOR_EMAIL=selftest@spinclass.invalid",
+		"GIT_COMMITTER_NAME=spinclass", "GIT_COMMITTER_EMAIL=selftest@spinclass.invalid",
+	}
+	signing, err := keyholder.GitSigningEnv(l.Base, pair.Session, keygen, pair, env, nil)
+	if err != nil {
+		return err
+	}
+	for k, v := range signing {
+		env = append(env, k+"="+v)
+	}
+	repo := filepath.Join(dir, "repo")
+	for _, args := range [][]string{
+		{"init", "-q", repo},
+		{"-C", repo, "commit", "-q", "--allow-empty", "-m", "key holder self-test"},
+		{"-C", repo, "verify-commit", "HEAD"},
+	} {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir, cmd.Env = dir, env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
+		}
+	}
+	return nil
 }
 
 func selftestListsOneKey(ctx context.Context, l *keyholder.Launcher, pair keyholder.Pair) error {

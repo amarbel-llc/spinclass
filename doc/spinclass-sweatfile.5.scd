@@ -1506,11 +1506,13 @@ needs one.
 - *sc keyholder-selftest* starts a real pair for a throwaway key with the
   trusted *fibby* and *piggy* (or *--fibby* and *--piggy*), whether or not the
   mode is on, checks that the holder lists exactly its one key, makes and
-  verifies one signature, stops the pair and checks that nothing is left. It
-  needs no terminal. It exits 0 with the last stdout line
-  *keyholder-selftest: OK ...*, or 1 with *keyholder-selftest: FAILED at STEP:*
-  as the last line, where STEP is *settings*, *preconditions*, *start*,
-  *list-key*, *sign*, *stop* or *leftovers*, under a *next:* line. *--json*
+  verifies one signature, makes a plain signed *git commit* in a throwaway
+  repository with the settings a worker gets and verifies it (see _Signing_
+  below), stops the pair and checks that nothing is left. It needs no terminal.
+  It exits 0 with the last stdout line *keyholder-selftest: OK ...*, or 1 with
+  *keyholder-selftest: FAILED at STEP:* as the last line, where STEP is
+  *settings*, *preconditions*, *start*, *list-key*, *sign*, *commit*, *stop* or
+  *leftovers*, under a *next:* line. *--json*
   prints one object instead: *ok*, *step* (*done* on success), *error*, *next*,
   *session*, *agent_sock*, *agent_unit*, *fibby_unit*, *left_over*.
 
