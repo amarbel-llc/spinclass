@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/clown/pkgs/peercheck"
+	"code.linenisgreat.com/spinclass/internal/0/hungstatus"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
@@ -186,10 +187,13 @@ func startBridge(ctx context.Context, newHandler func(rec crossingRecorder, stat
 		clearState()
 		return nil
 	}
+	stopBeat := func() {}
 	if w != nil {
 		w.mark(true, "")
+		stopBeat = startBridgeHeartbeat(ctx, w)
 	}
 	return func() {
+		stopBeat() // before the file goes, so a late beat cannot bring it back
 		stopListener()
 		// A serve that ended cleanly has no bridge to report on: the file goes,
 		// so `sc list` does not call a closed session's bridge down.
@@ -208,7 +212,9 @@ func newBridgeStateWriter(key string) *bridgeStateWriter {
 		servelog.Errorf("serve.bridge state file off: %v", err)
 		return nil
 	}
-	return &bridgeStateWriter{dir: crossinglog.StateDir(stateDir), principal: currentPrincipal(), key: key}
+	pid := os.Getpid()
+	ticks, _ := hungstatus.StartTicks(bridgeProcRoot, pid)
+	return &bridgeStateWriter{dir: crossinglog.StateDir(stateDir), principal: currentPrincipal(), key: key, pid: pid, ticks: ticks}
 }
 
 // openBridgeCrossingLog opens this principal's crossing log under

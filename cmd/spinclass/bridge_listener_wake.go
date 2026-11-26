@@ -62,8 +62,76 @@ func (l *wakeLimiter) allow(key, kind string, now time.Time, every time.Duration
 // bridgeStateWriter keeps the bridge state file of one session's listener.
 type bridgeStateWriter struct {
 	dir, principal, key string
-	mu                  sync.Mutex
-	last                *crossinglog.State
+	// pid and ticks name this serve in every write (see crossinglog.State);
+	// zero ticks (no /proc) leave only the pid and the heartbeat to go on.
+	pid   int
+	ticks uint64
+	mu    sync.Mutex
+	last  *crossinglog.State
+}
+
+// bridgeProcRoot is where a reader looks for the writer's process; a seam.
+var bridgeProcRoot = "/proc"
+
+// bridgeHeartbeatPoll is how often the heartbeat goroutine looks at the clock:
+// the listener's own 2 s cadence. A write happens only when the heartbeat is
+// older than crossinglog.HeartbeatEvery, so the file is rewritten about once a
+// minute.
+const bridgeHeartbeatPoll = 2 * time.Second
+
+// bridgeHeartbeatTicker makes the heartbeat's ticker; a seam for tests.
+var bridgeHeartbeatTicker = func(d time.Duration) (<-chan time.Time, func()) {
+	t := time.NewTicker(d)
+	return t.C, t.Stop
+}
+
+// beat refreshes the heartbeat of a listener that is up, and only when it is
+// older than crossinglog.HeartbeatEvery: a state that says down is not
+// refreshed (it needs no proof of life), and a file already removed stays gone.
+func (w *bridgeStateWriter) beat() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.last == nil || !w.last.Listening {
+		return
+	}
+	now := bridgeNow().UTC()
+	if now.Sub(w.last.HeartbeatAt) < crossinglog.HeartbeatEvery {
+		return
+	}
+	st := *w.last
+	st.UpdatedAt, st.HeartbeatAt = now, now
+	if err := crossinglog.WriteState(w.dir, w.principal, st); err != nil {
+		bridgeLogf("serve.bridge state heartbeat not written: %v", err)
+		return
+	}
+	w.last = &st
+}
+
+// startBridgeHeartbeat runs w.beat on the heartbeat ticker until ctx ends or
+// the returned stop is called; stop waits for the goroutine, so a caller that
+// removes the file afterwards cannot see it rewritten.
+func startBridgeHeartbeat(ctx context.Context, w *bridgeStateWriter) (stop func()) {
+	ticks, stopTick := bridgeHeartbeatTicker(bridgeHeartbeatPoll)
+	done, exited := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(exited)
+		defer stopTick()
+		for {
+			select {
+			case <-ticks:
+				w.beat()
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(done) })
+		<-exited
+	}
 }
 
 // mark records that the listener is up (reason ignored) or down for a reason.
@@ -77,7 +145,10 @@ func (w *bridgeStateWriter) mark(listening bool, reason string) {
 	if w.last != nil && w.last.Listening == listening {
 		since = w.last.Since
 	}
-	st := crossinglog.State{Session: w.key, Listening: listening, Reason: reason, Since: since, UpdatedAt: now}
+	st := crossinglog.State{
+		Session: w.key, Listening: listening, Reason: reason, Since: since, UpdatedAt: now,
+		PID: w.pid, StartTicks: w.ticks, HeartbeatAt: now,
+	}
 	if err := crossinglog.WriteState(w.dir, w.principal, st); err != nil {
 		bridgeLogf("serve.bridge state file not written: %v", err)
 	}

@@ -23,7 +23,9 @@ func bridgeStateNote(stateHome, principal string, withListening bool) string {
 	if !ok {
 		return ""
 	}
-	if n := st.Note(); n != "" {
+	// A listening state is believed only while the serve that wrote it lives:
+	// a serve that was killed cannot say so, and its file stays.
+	if n := st.NoteAt(bridgeProcRoot, bridgeNow()); n != "" {
 		return n
 	}
 	if withListening {

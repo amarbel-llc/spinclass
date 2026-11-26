@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+
+	"code.linenisgreat.com/spinclass/internal/0/hungstatus"
 )
 
 // State is what a session's bridge frontend last reported about its listener:
@@ -26,6 +28,51 @@ type State struct {
 	// Since is when Listening last changed.
 	Since     time.Time `json:"since"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// PID and StartTicks name the serve process that wrote the file (its pid
+	// and field 22 of its /proc stat), so a reader can tell a listener that is
+	// up from the last word of one that was killed. Zero in a file written
+	// before they existed: such a file is taken as it says.
+	PID        int    `json:"pid,omitempty"`
+	StartTicks uint64 `json:"start_ticks,omitempty"`
+	// HeartbeatAt is when the writer last said it was alive. A serve that is
+	// alive refreshes it at least every HeartbeatEvery.
+	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
+}
+
+const (
+	// HeartbeatEvery is how often a live serve refreshes HeartbeatAt: the state
+	// file is rewritten at most this often, never on every tick of the
+	// listener's check.
+	HeartbeatEvery = time.Minute
+	// HeartbeatStale is how old a heartbeat may be before a reader stops
+	// believing the writer is alive: three missed refreshes.
+	HeartbeatStale = 3 * HeartbeatEvery
+	// GoneNote is what is said of a bridge whose serve is gone.
+	GoneNote = "bridge DOWN: the serve that owned it is gone"
+)
+
+// WriterGone reports whether a state that says "listening" is the last word of
+// a serve that no longer lives: its pid is gone or belongs to another process
+// (the start ticks differ), or its heartbeat is stale. A state that says down
+// stands as written, and so does one with no pid (an older file). procRoot is
+// "/proc" outside tests.
+func (s State) WriterGone(procRoot string, now time.Time) bool {
+	if !s.Listening || s.PID == 0 {
+		return false
+	}
+	if hungstatus.FrontendState(procRoot, s.PID, s.StartTicks) != hungstatus.FrontendLive {
+		return true
+	}
+	return s.HeartbeatAt.IsZero() || now.Sub(s.HeartbeatAt) > HeartbeatStale
+}
+
+// NoteAt is Note with liveness: a listening state whose writer is gone reads
+// as down, with GoneNote.
+func (s State) NoteAt(procRoot string, now time.Time) string {
+	if s.WriterGone(procRoot, now) {
+		return GoneNote
+	}
+	return s.Note()
 }
 
 const (
