@@ -5,7 +5,7 @@ The switch is `[keyholder] mode` in a trusted sweatfile layer, default off; refe
 text is in `spinclass-sweatfile(5)`. The stated limits and the open lows are tracked
 issues, not a meeting: spinclass#515 (no wall between unconfined sessions), #516
 (silent pair death, heartbeats), #517 (sessions that predate the switch), #518 (a
-terminal is not the operator), #519 (an operator-only flip with no deploy), #520
+terminal is not the operator), #519 (an operator-only flip with no deploy: built, see "The deploy-free switch"), #520
 (holders for every session, the blessing, rule B), #521 (the certificate route has
 not run end to end; an old frontend is not detectable), #522 (a worker's post-merge
 targets), #523 (the open lows).
@@ -533,6 +533,52 @@ done out of order; every one fails closed and none exposes the operator's agent.
 A host's builds also matter: `.#spinclass-native` carries none of the tool pins and
 refuses to start a pair (the launcher never looks a program up on PATH); the shipped
 builds (`packages.default`) carry them.
+
+## The deploy-free switch (built; spinclass#519)
+
+Until this, the switch could only be flipped by a circus merge and a deploy, in
+either direction, and "on in any trusted layer wins" left no quick off. The operator
+ruled option A: an operator-owned file under the account's home that the host's
+configuration does not generate, and one command.
+
+- **The file.** `<passwd home>/.config/spinclass/keyholder-switch`, a sibling of the
+  `sweatfile` home-manager owns. The home is the account database's, never one the
+  environment names (`$HOME`, `$XDG_CONFIG_HOME` and `SPINCLASS_*` variables are not
+  consulted). One word: `on`, `off` or `default`; a trailing newline and surrounding
+  space are tolerated. An absent file is `default`.
+- **Semantics, for NEW launches.** `off` is the kill switch: the key holder is off
+  whatever any layer says (the one exception to "on in any trusted layer wins").
+  `on` turns it on; `fibby` and `piggy` still come from the trusted layers, and with
+  none supplying them the launch is refused and says so. `default` leaves the layers
+  to decide. All launch sites read it through the one function, `resolveKeyholderSwitch`
+  (`cmd/spinclass/keyholder_switch.go`, `applyKeyholderSwitchFile`), so spawn, resume,
+  the start hand-off, the relaunch boundary and `sc validate` agree.
+- **Fail closed.** A file that exists and is not one of the three words, is a link,
+  is not a regular file, is longer than a word or cannot be read refuses every launch,
+  naming the path and the way out (`sc keyholder-switch default`, or remove the file).
+  An account database that cannot answer leaves the file unread; the layers' own
+  handling of that failure is unchanged.
+- **With no file and no layer on, nothing changes.** The answer is exactly the layers'
+  (`TestAbsentSwitchFileLeavesTheLayersExactlyAsTheyWere`).
+- **The command.** `sc keyholder-switch on|off|default` needs a terminal, writes
+  atomically (a temporary file opened `O_EXCL|O_NOFOLLOW`, mode 0600, renamed into a
+  directory it checks: a real directory, owned by the account, not writable by group
+  or other; created 0700 when missing), and is journalled with the old and the new
+  word to the key holder journal. It stops no running pair and says so, naming
+  `sc keyholder-stop --all`, and states the limit once. Without an argument it prints
+  the effective mode and where it came from (switch file, layer, none) and needs no
+  terminal. `sc validate` shows the same, and `sc host-load` when the key holder is
+  on, a switch file exists or a launch would be refused (a host that never used the
+  key holder renders as before).
+- **The limit (spinclass#515).** A process of the same account can write this file as
+  well as the operator. It is the operator's setting, not a wall against the account's
+  own sessions; the real fix is the unwritable record of #515.
+- **Decisions where the spec was silent.** The file is read after the layers and a
+  hard failure of the layers still refuses first (the order is: layers, then the file).
+  `sc host-load` omits the line when the key holder is off with no file, so existing
+  output is unchanged. A journal that cannot be written warns and the change stands
+  (flipping to `off` is the safe direction). The command takes the one word as its
+  only argument; there is no `--force`.
 
 ## Later
 

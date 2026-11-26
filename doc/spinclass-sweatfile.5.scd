@@ -1464,8 +1464,31 @@ under the passwd home (*~/.config/spinclass/sweatfile*), where it binds every
 launch whatever repo the caller names; a parent-directory layer alone is a
 limit, not a guarantee. Any process of the account can edit these files (same
 user): the switch is the operator's setting, not a boundary against a session
-that can write the operator's home (tracked: spinclass#519 proposes an
-operator-only flip that needs no deploy).
+that can write the operator's home (tracked: spinclass#515).
+
+*The switch file (no deploy; spinclass#519).* The operator can flip the key
+holder without a deploy, in either direction, with *sc keyholder-switch on*,
+*off* or *default*, run at a terminal. It writes one word to
+*~/.config/spinclass/keyholder-switch* under the account's home as the passwd
+entry names it, never a home the environment names (a sibling of the
+*sweatfile* the host's configuration owns; the host does not generate it).
+*off* is a kill switch: for NEW launches the key holder is off whatever any
+layer says, the one exception to "on in any trusted layer wins". *on* turns it
+on, and *fibby* and *piggy* still come from the trusted layers: with none
+supplying them every launch is refused and says so. *default*, or no file at
+all, leaves the layers to decide, exactly as before the file existed. A file
+that exists and is not one of the three words, is not a regular file (a link is
+never followed), is long, or cannot be read refuses every launch, naming the
+path and the way out (*sc keyholder-switch default*, or remove the file). The
+command writes atomically (a temporary file, mode 0600, renamed into a
+directory it checks), is journalled to
+*$XDG_STATE_HOME/spinclass/keyholder-journal.ndjson* with the old and new word,
+and does NOT stop a running pair or change a running session:
+*sc keyholder-stop --all* ends the pairs. With no argument it prints the
+effective mode and where it came from (the switch file, a layer, or none) and
+needs no terminal; *sc validate* and *sc host-load* show the same. A process of the same account can
+write this file as well as the operator (spinclass#515): it is the operator's
+setting, not a wall against the account's own sessions.
 
 *mode*
 	*"off"* or *"on"*; unset means *"off"*. With *"on"* every WORKER session
