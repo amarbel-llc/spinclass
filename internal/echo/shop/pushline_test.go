@@ -58,7 +58,8 @@ func TestStartAndResumeSayWhetherThereIsAPushToken(t *testing.T) {
 	}
 
 	line, stdout := attach(executor.SessionExecutor{Entrypoint: []string{"true"}})
-	if line != "spinclass: push_token: no ([auth] mint-command is not set); pushes use the ssh agent this session was given\n" {
+	// The fixture has no origin: spinclass says it does not know how a push goes.
+	if line != "spinclass: push_token: no ([auth] mint-command is not set); spinclass could not read origin's push URL, so it does not know whether a push works\n" {
 		t.Errorf("a start without a holder said %q", line)
 	}
 	if strings.Contains(stdout, "push_token") {
@@ -66,7 +67,7 @@ func TestStartAndResumeSayWhetherThereIsAPushToken(t *testing.T) {
 	}
 
 	line, _ = attach(executor.SessionExecutor{Entrypoint: []string{"true"}, Env: map[string]string{keyholder.CertEnv: "/pair/cert/cert.pub"}})
-	for _, want := range []string{"spinclass: push_token: no. this worker cannot push: none was minted when the session was created", "`sc close repo/worker`"} {
+	for _, want := range []string{"spinclass: push_token: no (none was minted when the session was created); ", ". next: ", "`sc close repo/worker`"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("a resume on a holder said %q, lacks %q", line, want)
 		}

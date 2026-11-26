@@ -409,7 +409,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	// holds as a read-only file mount whose parent is a read-write bind: a
 	// rewrite from here would remove that mount (FDR 0035).
 	if unitRunning(id.WorktreePath) {
-		return MintOutcome{}, fmt.Errorf("[auth] refusing to mint for %s: its agent unit is running, and the mint would rewrite the unit's read-only config.worktree", id.WorktreePath)
+		return MintOutcome{}, mintFailed("the session's agent unit is running", fmt.Errorf("[auth] refusing to mint for %s: its agent unit is running, and the mint would rewrite the unit's read-only config.worktree", id.WorktreePath))
 	}
 	// No origin, or an origin that is not a forge URL (a local path): there is
 	// nothing a forge token could be scoped to, so — like an unlisted host —
@@ -417,17 +417,17 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	// must not stop a remote-less scratch repo from getting a session.
 	originURL, origin, err := readOrigin(id.RepoPath)
 	if err != nil {
-		return MintOutcome{Kind: NoForgeOrigin, Skipped: "no forge origin remote: " + strings.TrimSpace(err.Error())}, nil
+		return MintOutcome{Kind: NoForgeOrigin, Skipped: "no forge origin remote: " + RedactURLs(strings.TrimSpace(err.Error()))}, nil
 	}
 	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, origin.Host) {
 		return MintOutcome{Kind: HostNotListed, Skipped: fmt.Sprintf("origin host %s not in [auth].forge-hosts", origin.Host)}, nil
 	}
 	res, err := Resolve(ctx, urlResolver, id, originURL, origin)
 	if err != nil {
-		return MintOutcome{}, err
+		return MintOutcome{}, mintFailed("[auth].url-resolver failed", err)
 	}
 	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, res.Forge.Host) {
-		return MintOutcome{}, fmt.Errorf("[auth] url-resolver: canonical_https host %q is not in forge-hosts %v", res.Forge.Host, hosts)
+		return MintOutcome{}, mintFailed("the resolved host is not in [auth].forge-hosts", fmt.Errorf("[auth] url-resolver: canonical_https host %q is not in forge-hosts %v", res.Forge.Host, hosts))
 	}
 	// A pre-minted pool slot is preferred over the mint-command: the pool exists
 	// for when the card's agent is away. No matching slot falls through to the
@@ -444,7 +444,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 		}
 		claim, err = claimFromPool(poolDir, sf.AuthForgeHosts(), revokeHost, res.Forge.OwnerRepo, id.WorktreePath)
 		if err != nil {
-			return MintOutcome{}, err
+			return MintOutcome{}, mintFailed("the token pool could not be used", err)
 		}
 	}
 	switch {
@@ -463,11 +463,11 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 			return out, runErr
 		})
 		if err != nil {
-			return MintOutcome{}, fmt.Errorf("[auth] mint-command failed%s: %w", holderAgentHint(), err)
+			return MintOutcome{}, mintFailed(mintCommandCause(ctx, err), fmt.Errorf("[auth] mint-command failed%s: %w", holderAgentHint(), err))
 		}
 		token = strings.TrimSpace(out)
 		if token == "" {
-			return MintOutcome{}, errors.New("[auth] mint-command printed no token on stdout")
+			return MintOutcome{}, mintFailed("the mint command printed no token", errors.New("[auth] mint-command printed no token on stdout"))
 		}
 	}
 	// A claimed slot goes back into the pool if the session cannot be wired.
@@ -481,16 +481,19 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 			}
 		}()
 	}
+	storeFailed := func(cause string, err error) (MintOutcome, error) {
+		return MintOutcome{}, mintStoreFailed(cause, claim != nil, id.SessionKey, err)
+	}
 	credFile, err := writeCredential(id.WorktreePath, res.Rewrite.CredentialHost, token)
 	if err != nil {
-		return MintOutcome{}, fmt.Errorf("[auth] write credential: %w", err)
+		return storeFailed("writing the credential file failed", fmt.Errorf("[auth] write credential: %w", err))
 	}
 	if err := Inject(id.WorktreePath, credFile, res.Rewrite); err != nil {
-		return MintOutcome{}, fmt.Errorf("[auth] inject worktree config: %w", err)
+		return storeFailed("setting up the worktree's git config failed", fmt.Errorf("[auth] inject worktree config: %w", err))
 	}
 	st, err := session.EnsureWorktreeState(id.RepoPath, id.Branch, id.SessionKey, 0)
 	if err != nil {
-		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
+		return storeFailed("saving the session record failed", fmt.Errorf("[auth] record mint: %w", err))
 	}
 	// Pin the revoke-command resolved NOW, from the layers the caller vetted for
 	// this mint. Every later revoke runs this string and re-reads no sweatfile.
@@ -523,7 +526,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 		err = session.Write(*st)
 	}
 	if err != nil {
-		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
+		return storeFailed("saving the session record failed", fmt.Errorf("[auth] record mint: %w", err))
 	}
 	wired = true
 	outcome := MintOutcome{Minted: true, Source: cred.Source, PoolSlot: cred.PoolSlot, ExpiresAt: cred.ExpiresAt}

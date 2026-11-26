@@ -85,14 +85,33 @@ func TestASpawnReportsWhetherTheWorkerHasItsOwnKeyHolder(t *testing.T) {
 				t.Errorf("OwnKeyHolder = %v", p.OwnKeyHolder)
 			}
 			// And it says the truth about pushing for a worker with no token.
-			want := "pushes use the ssh agent this session was given"
-			if kh != nil {
-				want = "this worker cannot push: [auth] mint-command is not set"
-			}
-			if !strings.HasPrefix(p.PushLine, "push_token: no") || !strings.Contains(p.PushLine, want) {
-				t.Errorf("PushLine = %q, want it to say %q", p.PushLine, want)
+			// Only a worker on its own holder is told what to do next.
+			if !strings.HasPrefix(p.PushLine, "push_token: no ([auth] mint-command is not set); ") || strings.Contains(p.PushLine, ". next: ") != (kh != nil) || strings.Contains(p.PushLine, "cannot push") {
+				t.Errorf("PushLine = %q (own holder %v)", p.PushLine, kh != nil)
 			}
 		})
+	}
+}
+
+// With allow-no-credential the spawn goes on after a failed mint, and its result
+// is all the driver sees: the cause is in the line, the command's output is not.
+func TestASpawnWhoseMintFailsSaysWhyInItsResult(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, rollbackEntry)
+	// A parent-directory layer: [auth] is honoured only from above the repo.
+	layer := "[auth]\nmint-command = \"echo STDERR-MARKER >&2; exit 7\"\nrevoke-command = \"true\"\n\n[hooks]\nallow-no-credential = true\nallow-stale-base = true\n"
+	if err := os.WriteFile(filepath.Join(home, "eng", "sweatfile"), []byte(layer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "remote", "add", "origin", "https://forge.example.com/o/r.git").CombinedOutput(); err != nil {
+		t.Fatalf("remote add: %v\n%s", err, out)
+	}
+	withKeyholderHook(t, func(_, _, _ string) (map[string]string, func(), error) { return nil, nil, nil })
+	p, err := LaunchDetachedWith(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "", ConfineDefault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.PushLine, "the mint failed: the mint command exited with status 7") || strings.Contains(p.PushLine, "STDERR-MARKER") || strings.Contains(p.PushLine, "warning above") {
+		t.Errorf("PushLine = %q", p.PushLine)
 	}
 }
 

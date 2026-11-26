@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,6 +49,94 @@ func TestPoolMintRecordsTheSlotAndItsDeadline(t *testing.T) {
 	st, err := session.Read(repoPath, "feature-x")
 	if err != nil || st.Credential == nil || st.Credential.Source != SourcePool || st.Credential.PoolSlot != "pool/spinclass/07" || st.Credential.ExpiresAt == nil {
 		t.Fatalf("record = %+v err=%v", st, err)
+	}
+}
+
+// The line may be all a caller sees, so it carries the cause in Mint's own
+// words: never the command's output or the error's text.
+func TestAFailedMintsCauseIsInTheLine(t *testing.T) {
+	for name, tc := range map[string]struct{ cmd, want string }{
+		"status": {"echo STDERR-MARKER >&2; exit 7", "push_token: no (the mint failed: the mint command exited with status 7); "},
+		"empty":  {"true", "push_token: no (the mint failed: the mint command printed no token); "},
+		"agent":  {"echo 'Permission denied (publickey)' >&2; exit 1", "status 1 (the ssh agent offered no usable key or could not be reached)"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, id := setupRepo(t)
+			t.Setenv("SSH_AUTH_SOCK", "")
+			noBackoff(t)
+			_, err := Mint(context.Background(), authSweatfile(tc.cmd, "true"), id, "")
+			line := StatusFromMint(MintOutcome{}, err).Line(false, "repo/feature-x")
+			if err == nil || !strings.Contains(line, tc.want) || strings.Contains(line, "STDERR-MARKER") || strings.Contains(line, "publickey") {
+				t.Errorf("line = %q (failed: %v), want %q and no command output", line, err != nil, tc.want)
+			}
+		})
+	}
+}
+
+// A token that was made but not set up is "unknown", with how to revoke it.
+func TestAPartlyFailedMintSaysATokenMayExist(t *testing.T) {
+	_, _, id := setupRepo(t)
+	// core.worktree in the common config makes the git config step refuse.
+	_, err := Mint(context.Background(), authSweatfile(`git config core.worktree "$PWD" && echo tok`, "true"), id, "")
+	if err == nil || !strings.Contains(err.Error(), "may still be valid at the forge") || !strings.Contains(err.Error(), "SPINCLASS_SESSION_ID="+id.SessionKey) {
+		t.Fatalf("err = %v", err)
+	}
+	line := StatusFromMint(MintOutcome{}, err).Line(true, id.SessionKey)
+	for _, want := range []string{"push_token: unknown (a token was made, but setting up the worktree's git config failed", "may be valid at the forge", "revoke-command with SPINCLASS_SESSION_ID=" + id.SessionKey} {
+		if !strings.Contains(line, want) {
+			t.Errorf("line = %q lacks %q", line, want)
+		}
+	}
+}
+
+func TestARecordThatCannotBeReadIsNotSaidToHaveNoToken(t *testing.T) {
+	repoPath, wtPath, id := setupRepo(t)
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
+		t.Fatal(err)
+	}
+	corruptSessionRecords(t)
+	line := RecordedStatus(repoPath, "feature-x", wtPath).Line(true, id.SessionKey)
+	if !strings.HasPrefix(line, "push_token: unknown (spinclass could not read this session's record") {
+		t.Errorf("line = %q", line)
+	}
+}
+
+func corruptSessionRecords(t *testing.T) {
+	t.Helper()
+	records, err := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "spinclass", "records", "*.json"))
+	if err != nil || len(records) == 0 {
+		t.Fatalf("no session record to corrupt (%v)", err)
+	}
+	for _, r := range records {
+		if err := os.WriteFile(r, []byte("{not json"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestPushDestinationsReadsPushurlAndRewrites(t *testing.T) {
+	repoPath, wtPath, _ := setupRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", repoPath}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("remote", "set-url", "origin", "https://forge.example.com/o/r.git")
+	if got := PushDestinations(wtPath); got != (PushDest{HTTP: true}) {
+		t.Errorf("https origin = %+v", got)
+	}
+	run("remote", "set-url", "--push", "origin", "git@forge.example.com:o/r.git")
+	if got := PushDestinations(wtPath); got != (PushDest{SSH: true}) {
+		t.Errorf("ssh pushurl = %+v", got)
+	}
+	run("remote", "set-url", "--push", "origin", "/srv/mirror.git")
+	if got := PushDestinations(wtPath); got != (PushDest{Other: true}) {
+		t.Errorf("path pushurl = %+v", got)
+	}
+	run("remote", "remove", "origin")
+	if got := PushDestinations(wtPath); got != (PushDest{}) {
+		t.Errorf("no origin = %+v", got)
 	}
 }
 

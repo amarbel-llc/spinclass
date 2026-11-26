@@ -143,7 +143,7 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 		if err := ProvisionCredential(
 			context.Background(), tw, result, worktreePath, opts.AllowNoCredential, opts.Push,
 		); err != nil {
-			return false, fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential (pushes then use the inherited ssh-agent)", err)
+			return false, fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential", err)
 		}
 	} else if opts.Push != nil {
 		*opts.Push = auth.RecordedStatus(worktreePath.RepoPath, worktreePath.Branch, worktreePath.AbsPath)
@@ -236,6 +236,8 @@ func ProvisionCredential(
 			// The parse error quotes the remote URL, which may carry userinfo.
 			push.Reason = "the origin is not a forge URL, or there is none"
 		}
+		// Read before the switch below may remove the worktree.
+		push.PushTo = auth.PushDestinations(worktreePath.AbsPath)
 	}
 	switch {
 	case mintErr != nil && !allowNoCredential:
@@ -245,17 +247,17 @@ func ProvisionCredential(
 		}
 		return mintErr
 	case mintErr != nil:
-		msg := mintErr.Error() + " (allow-no-credential: session created without a push credential; pushes use the inherited ssh-agent)"
+		msg := auth.RedactURLs(mintErr.Error()) + " (allow-no-credential: session created without a push credential recorded)"
 		if tw != nil {
 			tw.NotOk(mintDesc, map[string]string{"severity": "warn", "message": msg})
 		} else {
-			log.Warn("credential mint failed; continuing without one", "branch", worktreePath.Branch, "err", mintErr)
+			log.Warn("credential mint failed; continuing without one", "branch", worktreePath.Branch, "err", auth.RedactURLs(mintErr.Error()))
 		}
 	case outcome.Skipped != "":
 		if tw != nil {
 			tw.Skip(mintDesc, outcome.Skipped)
 		} else {
-			log.Warn("credential mint skipped; pushes use the inherited ssh-agent", "branch", worktreePath.Branch, "reason", outcome.Skipped)
+			log.Warn("credential mint skipped; the session has no push token", "branch", worktreePath.Branch, "reason", outcome.Skipped)
 		}
 	case outcome.Minted:
 		if tw != nil {

@@ -1006,11 +1006,24 @@ start and resume on stderr). With a token it says where it came from
 (*minted by [auth].mint-command*, or *pool slot* and the slot's name), *reused* with the
 time for a token the session already had, and when it expires if spinclass was
 told (a pool slot's deadline; otherwise *expiry unknown*: spinclass never reads
-the token). Without one it says why. A session with no key holder then pushes
-with the ssh agent it was given. A session on its own key holder has only a key
-no forge knows, so it cannot push over ssh, and the line says what to do; an
-origin that needs no ssh key (a local path, or an https remote your own git
-config has a credential helper for) is not affected. A token is only made when
+the token). A token whose recorded expiry has passed reads *expired at* that
+time. An ssh push URL of origin that the token's rewrite does not cover is
+named, since a push there does not use the token.
+
+Without a token the line says why, then what spinclass knows from the kinds of
+origin's push URLs as git resolves them (*pushurl* and url rewrites applied; no
+URL is printed). It never claims that a session cannot push. For an ssh push
+URL, a session with no key holder uses the ssh agent it was given; for a session
+on its own key holder, no forge is known to accept the worker's key. For an
+http(s) push URL a push works only if git already has a credential for it, which
+spinclass does not know. For any other push URL, or when none can be read, it
+says that it does not know. A session on its own key holder is also told what to
+do next. *push_token: unknown* means spinclass cannot say yes or no: the
+session record could not be read, or a token was made but could not be set up or
+recorded, in which case it may be valid at the forge and the line says how to
+revoke it. With *allow-no-credential* a failed mint's cause is in the line (an
+exit status, no output, an unreachable ssh agent), never the command's output.
+A token is only made when
 a session is created. The session record, and its tombstone after a close, keep
 *credential.source* (*mint-command* or *pool*), *pool\_slot* and *expires\_at*:
 names and times, never the token. A failed mint or revoke run while the ssh

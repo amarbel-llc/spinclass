@@ -31,10 +31,16 @@ func TestPushLineSaysTokenSourceAndExpiry(t *testing.T) {
 	}
 }
 
-// Without a token the truth depends on the holder: with one the worker's only
-// ssh key is unknown to the forge; without one it pushes with the agent it was
-// given.
+// Without a token the line says only what spinclass knows, per kind of push URL:
+// it never claims a worker cannot push, since git may hold an https credential.
 func TestPushLineWithNoTokenSaysWhatThatMeansForThisSession(t *testing.T) {
+	const (
+		holderSSH = "for an ssh push URL, no forge is known to accept this worker's key, so expect that push to fail"
+		agentSSH  = "an ssh push uses the ssh agent this session was given"
+		overHTTP  = "an http(s) push works only if git already has a credential for it (spinclass does not know)"
+		other     = "origin has a push URL that is neither ssh nor http(s), and spinclass does not know whether a push there works"
+		unread    = "spinclass could not read origin's push URL, so it does not know whether a push works"
+	)
 	for _, tc := range []struct {
 		name string
 		p    PushStatus
@@ -45,23 +51,66 @@ func TestPushLineWithNoTokenSaysWhatThatMeansForThisSession(t *testing.T) {
 		{"pool empty", StatusFromMint(MintOutcome{Kind: PoolEmpty, Skipped: "token pool has no unclaimed, unexpired slot for o/r"}, nil), "refill the token pool"},
 		{"mint failed", StatusFromMint(MintOutcome{}, errors.New("boom SECRET-IN-ERROR")), "fix the mint"},
 	} {
-		with := tc.p.Line(true, "repo/w")
-		for _, want := range []string{"push_token: no. this worker cannot push: " + tc.p.Reason, "no forge knows its key holder's key", "next: " + tc.next, "`sc close repo/w`"} {
-			if !strings.Contains(with, want) {
-				t.Errorf("%s with a holder: %q lacks %q", tc.name, with, want)
+		for _, url := range []struct {
+			name          string
+			dest          PushDest
+			holder, agent string
+		}{
+			{"ssh", PushDest{SSH: true}, holderSSH, agentSSH},
+			{"http", PushDest{HTTP: true}, overHTTP, overHTTP},
+			{"both", PushDest{SSH: true, HTTP: true}, holderSSH + "; " + overHTTP, agentSSH + "; " + overHTTP},
+			{"other", PushDest{Other: true}, other, other},
+			{"unread", PushDest{}, unread, unread},
+		} {
+			p := tc.p
+			p.PushTo = url.dest
+			with := p.Line(true, "repo/w")
+			head := "push_token: no (" + p.Reason + "); " + url.holder + ". next: " + tc.next
+			if !strings.HasPrefix(with, head) || !strings.Contains(with, "`sc close repo/w`") || strings.Contains(with, "cannot push") {
+				t.Errorf("%s, %s, with a holder = %q, want it to start %q and name sc close", tc.name, url.name, with, head)
+			}
+			without := p.Line(false, "repo/w")
+			if want := "push_token: no (" + p.Reason + "); " + url.agent; without != want {
+				t.Errorf("%s, %s, without a holder = %q, want %q", tc.name, url.name, without, want)
+			}
+			if strings.Contains(with+without, "SECRET-IN-ERROR") {
+				t.Errorf("%s: the mint error's text reached the line", tc.name)
 			}
 		}
-		without := tc.p.Line(false, "repo/w")
-		if want := "push_token: no (" + tc.p.Reason + "); pushes use the ssh agent this session was given"; without != want {
-			t.Errorf("%s without a holder = %q, want %q", tc.name, without, want)
-		}
-		if strings.Contains(with+without, "SECRET-IN-ERROR") {
-			t.Errorf("%s: the mint error's text reached the line", tc.name)
-		}
 	}
-	local := PushStatus{Kind: NoForgeOrigin, Reason: "the origin is not a forge URL, or there is none"}.Line(true, "repo/w")
-	if strings.Contains(local, "cannot push") || !strings.Contains(local, "a push works only if this origin needs no ssh key") {
-		t.Errorf("an origin that is no forge: %q", local)
+}
+
+// A token whose recorded expiry has passed is not a "yes".
+func TestAnExpiredTokenIsNotAYes(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	prev := pushClock
+	pushClock = func() time.Time { return now }
+	t.Cleanup(func() { pushClock = prev })
+
+	past, soon := now.Add(-time.Minute), now.Add(time.Minute)
+	got := PushStatus{Token: true, Reused: true, Source: SourcePool, PoolSlot: "trip-3", MintedAt: past.Add(-time.Hour), ExpiresAt: &past}.Line(true, "repo/w")
+	want := "push_token: expired at 2026-11-26T11:59:00Z (reused: pool slot trip-3, since 2026-11-26T10:59:00Z). next: `sc close repo/w` and start it again (a token is only made when a session is created)"
+	if got != want {
+		t.Errorf("expired = %q, want %q", got, want)
+	}
+	if got := (PushStatus{Token: true, Source: SourceMint, ExpiresAt: &soon}).Line(true, "repo/w"); !strings.HasPrefix(got, "push_token: yes (") {
+		t.Errorf("not yet expired = %q", got)
+	}
+}
+
+// With a token, an ssh push URL (a pushurl the rewrite does not cover) is named:
+// the token is not used there.
+func TestATokenLineNamesAnSSHPushURLItDoesNotCover(t *testing.T) {
+	got := PushStatus{Token: true, Source: SourceMint, PushTo: PushDest{SSH: true}}.Line(false, "repo/w")
+	if want := "push_token: yes (minted by [auth].mint-command; expiry unknown); an ssh push URL of origin does not use this token"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRedactURLsRemovesUserinfo(t *testing.T) {
+	got := RedactURLs(`parse remote "https://bob:hunter2@h.example/o/r": bad; also ssh://git@h.example/r and git@h.example:r`)
+	if want := `parse remote "https://<redacted>@h.example/o/r": bad; also ssh://<redacted>@h.example/r and git@h.example:r`; got != want {
+		t.Errorf("got %q", got)
 	}
 }
 

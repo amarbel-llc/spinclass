@@ -4,12 +4,18 @@ package auth
 // and resume. Names and times only; nothing here ever holds a token.
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/agentretry"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
@@ -32,7 +38,105 @@ const (
 	NoneAtCreation  NoTokenKind = "none-at-creation"
 	AlreadyRevoked  NoTokenKind = "revoked"
 	UnknownNoReason NoTokenKind = ""
+	// MintUnrecorded and RecordUnreadable are "spinclass does not know", never
+	// "no": a token was made but not set up or recorded, or the record could not
+	// be read.
+	MintUnrecorded   NoTokenKind = "mint-unrecorded"
+	RecordUnreadable NoTokenKind = "record-unreadable"
 )
+
+// pushClock says whether a recorded expiry has passed. A variable for tests.
+var pushClock = time.Now
+
+// PushDest is the kinds of origin's push URLs as git resolves them (pushurl and
+// every url rewrite applied). Only kinds are kept: a URL may carry userinfo.
+type PushDest struct {
+	SSH, HTTP, Other bool
+}
+
+func (d PushDest) read() bool { return d.SSH || d.HTTP || d.Other }
+
+// PushDestinations reads the push URLs of origin as git in dir resolves them.
+// The zero value means they could not be read.
+func PushDestinations(dir string) PushDest {
+	out, err := git.Run(dir, "remote", "get-url", "--push", "--all", "origin")
+	if err != nil {
+		return PushDest{}
+	}
+	var d PushDest
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		r, perr := ParseForgeRemote(line)
+		switch {
+		case strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://"):
+			d.HTTP = true
+		case perr == nil && r.SSHPrefix != "" && !strings.HasPrefix(line, "/") && !strings.HasPrefix(line, "."):
+			d.SSH = true
+		default:
+			d.Other = true
+		}
+	}
+	return d
+}
+
+var urlUserinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s"']*@`)
+
+// RedactURLs removes the userinfo of every scheme URL in text.
+func RedactURLs(text string) string {
+	return urlUserinfo.ReplaceAllString(text, "${1}<redacted>@")
+}
+
+// mintFailure is a failed Mint with a cause short and safe enough for the push
+// token line: no command output and no URL. Its text has URL userinfo removed.
+type mintFailure struct {
+	cause     string
+	tokenMade bool
+	err       error
+}
+
+func (f *mintFailure) Error() string { return RedactURLs(f.err.Error()) }
+func (f *mintFailure) Unwrap() error { return f.err }
+
+func mintFailed(cause string, err error) error {
+	return &mintFailure{cause: cause, err: err}
+}
+
+// mintStoreFailed is a failure after a token was in hand. A fresh mint's token
+// then exists at the forge with no record to revoke it by; a pool slot's goes
+// back to the pool.
+func mintStoreFailed(cause string, fromPool bool, sessionKey string, err error) error {
+	if fromPool {
+		return &mintFailure{cause: cause + " (the pool slot went back to the pool)", err: err}
+	}
+	return &mintFailure{cause: cause, tokenMade: true, err: fmt.Errorf(
+		"%w (a token was made and may still be valid at the forge: revoke it by running your [auth].revoke-command with SPINCLASS_SESSION_ID=%s)", err, sessionKey)}
+}
+
+// mintCommandCause classifies a failed mint command without quoting it.
+func mintCommandCause(ctx context.Context, err error) string {
+	var exit *exec.ExitError
+	var cause string
+	switch {
+	case ctx.Err() != nil:
+		cause = "the mint command was stopped or timed out"
+	case errors.As(err, &exit) && exit.ExitCode() >= 0:
+		cause = fmt.Sprintf("the mint command exited with status %d", exit.ExitCode())
+	case errors.As(err, &exit):
+		cause = "the mint command was killed by a signal"
+	default:
+		cause = "the mint command could not be run"
+	}
+	if agentretry.AgentTrouble(err.Error()) {
+		cause += " (the ssh agent offered no usable key or could not be reached)"
+	}
+	if holderAgentHint() != "" {
+		cause += " (the ssh agent here is a key holder's and holds no card: run it from your own shell or a session without a key holder)"
+	}
+	return cause
+}
 
 // PushStatus is a session's push token: whether it has one, where it came from
 // and when it expires if spinclass was told, else why it has none.
@@ -45,16 +149,23 @@ type PushStatus struct {
 	MintedAt  time.Time
 	ExpiresAt *time.Time // nil: spinclass was not told
 	Kind      NoTokenKind
-	Reason    string // for a person; names only
+	Reason    string   // for a person; names only
+	PushTo    PushDest // origin's push URLs, by kind
 }
 
 // StatusFromMint is the status of a session whose creation ran Mint. err is
-// Mint's error when the session was created anyway (allow-no-credential); its
-// text is not repeated here, the warning that precedes the line carries it.
+// Mint's error when the session was created anyway (allow-no-credential). The
+// line may be all a caller sees (a spawn's result), so it carries the cause, in
+// Mint's own short words and never the error's text.
 func StatusFromMint(o MintOutcome, err error) PushStatus {
+	var failure *mintFailure
 	switch {
+	case errors.As(err, &failure) && failure.tokenMade:
+		return PushStatus{Kind: MintUnrecorded, Reason: "a token was made, but " + failure.cause + ", so it may be valid at the forge with no record of it"}
+	case errors.As(err, &failure):
+		return PushStatus{Kind: MintFailed, Reason: "the mint failed: " + failure.cause}
 	case err != nil:
-		return PushStatus{Kind: MintFailed, Reason: "the mint failed (see the warning above)"}
+		return PushStatus{Kind: MintFailed, Reason: "the mint failed: spinclass could not load [auth] or finish the mint"}
 	case o.Minted:
 		return PushStatus{Token: true, Source: o.Source, PoolSlot: o.PoolSlot, ExpiresAt: o.ExpiresAt}
 	case o.Skipped != "":
@@ -66,7 +177,16 @@ func StatusFromMint(o MintOutcome, err error) PushStatus {
 // RecordedStatus is the status of a session that already exists, from its
 // record and whether its credential file is still there. Nothing is minted.
 func RecordedStatus(repoPath, branch, worktreePath string) PushStatus {
+	p := recordedToken(repoPath, branch, worktreePath)
+	p.PushTo = PushDestinations(worktreePath)
+	return p
+}
+
+func recordedToken(repoPath, branch, worktreePath string) PushStatus {
 	st, err := session.Read(repoPath, branch)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return PushStatus{Kind: RecordUnreadable, Reason: "spinclass could not read this session's record, so it does not know whether it has a token"}
+	}
 	if err != nil || st.Credential == nil {
 		return PushStatus{Kind: NoneAtCreation, Reason: "none was minted when the session was created"}
 	}
@@ -80,23 +200,56 @@ func RecordedStatus(repoPath, branch, worktreePath string) PushStatus {
 	return PushStatus{Token: true, Reused: true, Source: c.Source, PoolSlot: c.PoolSlot, MintedAt: c.MintedAt, ExpiresAt: c.ExpiresAt}
 }
 
-// Line is the one line printed for this status. ownHolder is whether the
-// session runs on its own key holder: without a token it then has only a key
-// no forge knows, while a session with no holder pushes with the ssh agent it
-// was given.
+// Line is the one line printed for this status. It says only what spinclass
+// knows: whether it made a token, and the kinds of origin's push URLs. ownHolder
+// is whether the session runs on its own key holder, whose key no forge is
+// known to accept.
 func (p PushStatus) Line(ownHolder bool, sessionKey string) string {
+	again := "`sc close " + sessionKey + "` and start it again (a token is only made when a session is created)"
 	if p.Token {
-		return "push_token: yes (" + p.sourceText() + "; " + p.expiryText() + ")"
+		if p.ExpiresAt != nil && !p.ExpiresAt.After(pushClock()) {
+			return "push_token: expired at " + p.ExpiresAt.UTC().Format(time.RFC3339) + " (" + p.sourceText() + "). next: " + again
+		}
+		line := "push_token: yes (" + p.sourceText() + "; " + p.expiryText() + ")"
+		if p.PushTo.SSH {
+			line += "; an ssh push URL of origin does not use this token"
+		}
+		return line
 	}
+	switch p.Kind {
+	case MintUnrecorded:
+		return "push_token: unknown (" + p.Reason + "). next: revoke it by running your [auth].revoke-command with SPINCLASS_SESSION_ID=" + sessionKey + ", then " + again
+	case RecordUnreadable:
+		return "push_token: unknown (" + p.Reason + "). next: `sc list` shows why the record cannot be read"
+	}
+	line := "push_token: no (" + p.Reason + "); " + p.pushText(ownHolder)
 	if !ownHolder {
-		return "push_token: no (" + p.Reason + "); pushes use the ssh agent this session was given"
+		return line
 	}
-	next := p.next()
-	again := "then `sc close " + sessionKey + "` and start it again (a token is only made when a session is created)"
-	if p.Kind == NoForgeOrigin {
-		return "push_token: no (" + p.Reason + "). its only ssh key is its key holder's: a push works only if this origin needs no ssh key. next: " + next + ", " + again
+	return line + ". next: " + p.next() + ", then " + again
+}
+
+// pushText says what a push does without a spinclass token, one clause per kind
+// of push URL.
+func (p PushStatus) pushText(ownHolder bool) string {
+	if !p.PushTo.read() {
+		return "spinclass could not read origin's push URL, so it does not know whether a push works"
 	}
-	return "push_token: no. this worker cannot push: " + p.Reason + ", and no forge knows its key holder's key. next: " + next + ", " + again
+	var clauses []string
+	if p.PushTo.SSH {
+		if ownHolder {
+			clauses = append(clauses, "for an ssh push URL, no forge is known to accept this worker's key, so expect that push to fail")
+		} else {
+			clauses = append(clauses, "an ssh push uses the ssh agent this session was given")
+		}
+	}
+	if p.PushTo.HTTP {
+		clauses = append(clauses, "an http(s) push works only if git already has a credential for it (spinclass does not know)")
+	}
+	if p.PushTo.Other {
+		clauses = append(clauses, "origin has a push URL that is neither ssh nor http(s), and spinclass does not know whether a push there works")
+	}
+	return strings.Join(clauses, "; ")
 }
 
 func (p PushStatus) sourceText() string {
