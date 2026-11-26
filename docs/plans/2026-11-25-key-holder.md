@@ -505,7 +505,12 @@ done out of order; every one fails closed and none exposes the operator's agent.
    SHIPPED binary is checked by the bats lane
    (`keyholder_build_marker_is_in_the_shipped_binary`, in
    `zz-tests_bats/serve.bats`), not by a Go test (a Go test binary holds the text
-   for any reference a test makes).
+   for any reference a test makes). The marker is not bumped for every change: it
+   must be bumped (here and in the bats test) whenever a later change makes serves
+   that carry the older marker unsafe at switch-on, so they are listed as stale.
+   It was NOT bumped for the evidence rule that followed the merge of 07f71750,
+   because 07f71750 was never deployed to any host (the bump was held for that
+   batch), so no live serve carries the marker without the rule.
 6. **The operator switches `mode` on** (his act). Before this, a launch with the
    mode on and the paths unset is refused naming the setting.
 

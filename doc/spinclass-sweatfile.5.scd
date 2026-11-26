@@ -1535,8 +1535,10 @@ that can write the operator's home.
 	running serve keeps the binary it started with and spawns workers on the
 	operator's agent, ignoring *[keyholder]*; *sc host-load* lists such serves under
 	KEY HOLDER STALE SERVE whether the switch is on or off, from any directory, so
-	check it at this step and restart until it is empty); (6) the operator sets
-	*mode = "on"*. Clown's refusal text for step 2 was read in the parent of
+	check it at this step and restart until it is empty; the marker is bumped
+	whenever a later change makes older key holder serves unsafe, and it was not
+	bumped after the first merge because that build was never deployed); (6) the
+	operator sets *mode = "on"*. Clown's refusal text for step 2 was read in the parent of
 	f502df21 (its spec check already refused *SSH_AUTH_SOCK* as a scrubbed key); an
 	older clown was not run.
 
