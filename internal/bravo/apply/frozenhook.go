@@ -244,7 +244,7 @@ func ReinstallPreCommitHook(sf sweatfile.Sweatfile, worktreePath string) (*sessi
 // worker-writable: a caller copies it into the frontend's record only right
 // after an install it ran itself.
 func ReadHookRecord(worktreePath string) (*session.FrozenHook, error) {
-	data, err := os.ReadFile(filepath.Join(worktreePath, ".spinclass", hookRecordName))
+	data, err := safeio.ReadRegular(filepath.Join(worktreePath, ".spinclass", hookRecordName), safeio.MaxReadSize)
 	if err != nil {
 		return nil, err
 	}

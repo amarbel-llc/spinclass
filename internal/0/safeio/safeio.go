@@ -12,6 +12,7 @@ package safeio
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -40,6 +41,44 @@ func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 		return nil, fmt.Errorf("%s is a symlink: refusing to open %s through it", filepath.Dir(path), filepath.Base(path))
 	}
 	return os.OpenFile(path, flag|syscall.O_NOFOLLOW, perm)
+}
+
+// MaxReadSize is the cap ReadRegular callers use for the small per-worktree
+// files (the display copy of a session record, the hook sidecar): far above any
+// honest one, far below what could exhaust the frontend.
+const MaxReadSize = 1 << 20
+
+// ReadRegular reads a file under a worktree the worker can write, the way a
+// frontend must: it refuses a symlink at the final element (O_NOFOLLOW, so a link
+// to /dev/zero is not followed), never blocks opening a FIFO (O_NONBLOCK), reads
+// only a regular file (a FIFO or device that opened is refused by fstat) and no
+// more than max bytes (a larger file is an error, not a truncated read). A plain
+// os.ReadFile does none of this: a FIFO at the path hangs it, and /dev/zero
+// exhausts memory.
+func ReadRegular(path string, max int64) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file (mode %s): refusing to read it", path, fi.Mode().Type())
+	}
+	if fi.Size() > max {
+		return nil, fmt.Errorf("%s is %d bytes, over the %d byte limit: refusing to read it", path, fi.Size(), max)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("%s grew past the %d byte limit while being read: refusing it", path, max)
+	}
+	return data, nil
 }
 
 // Create is os.Create through OpenFile.

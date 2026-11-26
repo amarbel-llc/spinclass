@@ -258,7 +258,7 @@ func readTombstone(path, name string) (*State, error) {
 // Inside a unit nothing is migrated.
 func legacyLoad(wt string) (*State, error) {
 	path := worktreeStatePath(wt)
-	data, err := os.ReadFile(path)
+	data, err := safeio.ReadRegular(path, safeio.MaxReadSize)
 	if err != nil {
 		return nil, err
 	}
@@ -357,8 +357,14 @@ func compareDisplay(rec *State) {
 		return
 	}
 	path := worktreeStatePath(rec.WorktreePath)
-	data, err := os.ReadFile(path)
+	data, err := safeio.ReadRegular(path, safeio.MaxReadSize)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			// A copy that is a FIFO, a link, too large or unreadable: the worker may
+			// have planted it. It is never read further; say so and use the frontend
+			// record.
+			report(fmt.Sprintf("worktree copy %s of session record %s cannot be read (%v); the frontend record is used", path, rec.Key(), err))
+		}
 		return // no copy is fine: it is display-only
 	}
 	var shown State
