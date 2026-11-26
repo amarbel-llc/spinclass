@@ -81,15 +81,21 @@ started there could reach the agent only through the file the `.envrc` loads
 
 ## A changed agent is a changed boundary: close and respawn (B-F2, A-H1)
 
-A confined spawn writes its unit spec once, and clown re-reads that spec file on
-every relaunch (a resume, a restart in place, a start hand-off) and REFUSES the
-relaunch when the spec's boundary digest changed. The digest covers the sorted
-socket purposes, so swapping the operator's agent socket (purpose `piggy-agent`)
-for a holder socket (purpose `key-holder`) is a changed boundary. We do not hide
-that from the check built to see it: a session whose stored spec does not match
-what the builder would write for the switch as it is NOW is not relaunched, and
-spinclass says so first, before clown is called and before any pair is started
-for the relaunch (`spawn.CheckAgentBoundary`,
+A confined spawn writes its unit spec once, and clown re-reads that spec FILE on
+every relaunch (a resume, a restart in place, a start hand-off). Clown's own gate
+compares the file's boundary digest with the one it recorded at the last confined
+launch, and the digest covers the sorted socket purposes. But the file does not
+change by itself: an UNCHANGED stale spec has the recorded digest, so clown
+relaunches it, silently, with whatever agent it was spawned with (verified by
+reading `agentscope_record.go` `loadLaunchSpec` / `boundaryDigest` and the compare
+at its line 348: the digest is taken from the file on disk now). Clown's gate
+therefore refuses only a spec file REPLACED in place with other socket purposes
+("a changed spec means a new session"). It is NOT a second wall against a changed
+switch. **Spinclass's own check is the only wall.** A changed agent is a changed
+boundary, and a session whose stored spec does not match what the builder would
+write for the switch as it is NOW is not relaunched; spinclass says so first,
+before clown is called and before any pair is started for the relaunch
+(`spawn.CheckAgentBoundary`,
 `internal/foxtrot/spawn/confine_agentcheck.go`; the callers are in
 `cmd/spinclass/keyholder_boundary.go`). Nothing is rewritten, in either direction:
 
@@ -115,7 +121,9 @@ pair check, which is shared by `restart-this-session`, `restart-child-session`,
 (3) the start hand-off (next section). A respawn's `stickyAgentSocket`
 (`internal/foxtrot/spawn/confine.go:469`) still reads an earlier spec for the
 switch-off builder only. Clown's own restart in place that never goes through the
-preflight is not covered here; clown's digest check refuses it too.
+preflight is NOT covered here, and clown does not cover it either: it re-reads the
+unchanged spec, its digest matches the recorded one, and the session relaunches with
+its OLD boundary (the old agent). That is known behaviour, not a refusal.
 
 ## Start hand-offs (A-M1)
 
@@ -306,6 +314,42 @@ cannot write.
   `sc keyholder-stop --all` stops it only with `--including-unowned`, after
   listing it (journalled `stop-unowned`). A hand-removed directory AND history
   AND lock leave the units "not mine" too: `--including-unowned` is the way out.
+
+## Deploy order, and what breaks if it is violated (B-M5, B-M4)
+
+A host takes the key holder in this order. Each step names what breaks when it is
+done out of order; every one fails closed and none exposes the operator's agent.
+
+1. **A spinclass that parses `[keyholder]`** is on the host. Without it,
+   `sc validate` rejects the `[keyholder]` table circus's configuration writes
+   (an unknown table), in every gate that runs it. Circus's own check
+   (`infra/hosts/lib/spinclass-parses-keyholder.nix`) makes this order mechanical.
+2. **Clown f502df21 or later** is the host's clown. Its spec validation lets a
+   confined spec set `SSH_AUTH_SOCK` to a socket it binds (the holder's). An OLDER
+   clown refuses every confined spawn with "env key SSH_AUTH_SOCK is scrubbed from
+   the agent scope and may not be set by the spec" (the scrubbed-key branch of
+   clown `internal/alfa/agentscope/spec.go`, seen in the source; I did not run an
+   older clown). That is fail closed and loud, but the text does not point at the
+   key holder. **There is no way for spinclass to detect it ahead of time:**
+   `clown agent-scope-capabilities` lists `agent-unit`, `private-network`,
+   `frontend-mcp-sockets` and the like, and carries no marker for this rule, and
+   clown has no validate-only command to ask. So the order is a HARD requirement:
+   clown f502df21 first, then the switch.
+3. **Lingering is enabled** for the user: `loginctl enable-linger <user>`. The pair
+   is two transient USER units; a user manager that exits at the last logout takes
+   every key with it, announced at the next resume of each session (K3's notice). A
+   launch with no user manager to talk to is refused with a message that names
+   lingering (`userManagerHint`, `internal/0/keyholder/systemd.go`); a user manager
+   that exists but will not outlive the login is not detectable ahead of time, so
+   this step is also a requirement, not a check.
+4. **Circus's `[keyholder]` configuration** (`mode = "off"`, `fibby`, `piggy`) is
+   deployed. With the mode off nothing starts and nothing is validated beyond parse.
+5. **The operator switches `mode` on** (his act). Before this, a launch with the
+   mode on and the paths unset is refused naming the setting.
+
+A host's builds also matter: `.#spinclass-native` carries none of the tool pins and
+refuses to start a pair (the launcher never looks a program up on PATH); the shipped
+builds (`packages.default`) carry them.
 
 ## Later
 

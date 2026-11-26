@@ -1483,12 +1483,15 @@ that can write the operator's home.
 	reaching one only by an explicit time-limited blessing) is in
 	docs/plans/2026-11-25-key-holder.md. A session started again by
 	*start-child-session* or *sc start-stopped* is a worker and gets its own pair.
-	A confined session keeps the agent socket its unit spec was written with: the
-	spec is read again on every relaunch and clown refuses a changed boundary, and
-	a changed agent is one. So a confined session spawned before the switch went
-	on, and one spawned with a holder before it goes off, is not relaunched by
-	*sc resume*, a restart or a start hand-off: spinclass refuses first, naming the
-	change, and the answer is to close the session and spawn a new one.
+	A confined session keeps the agent socket its unit spec was written with.
+	Clown reads the stored spec again on every relaunch and relaunches it as it
+	is: its own gate refuses only a spec file replaced in place with other socket
+	purposes, never an unchanged stale one. So spinclass's own check is the ONLY
+	wall: a confined session spawned before the switch went on, and one spawned
+	with a holder before it goes off, is not relaunched by *sc resume*, a restart
+	or a start hand-off. Spinclass refuses first, naming the change, and the
+	answer is to close the session and spawn a new one. A restart in place that
+	never goes through spinclass's restart preflight keeps the old boundary.
 	For a session that is not confined this is delegation hygiene, not a
 	boundary. Switching it *"off"* leaves no pair, unit or directory for new
 	sessions. *sc session-key SESSION* prints the session's public key and
@@ -1498,6 +1501,19 @@ that can write the operator's home.
 	that the signer writes by rename and a confined unit gets read-only; the
 	session finds it at *$SPINCLASS_KEYHOLDER_CERT*. Any other value is an error
 	and leaves the key holder off.
+
+	*Deploy order.* A host takes the key holder in this order, and each step fails
+	closed when skipped: (1) a spinclass that parses *[keyholder]* (without it,
+	*sc validate* rejects the table); (2) clown f502df21 or later (an older clown
+	refuses every confined spawn, saying that *SSH_AUTH_SOCK* may not be set by the
+	spec, without pointing at the key holder; spinclass cannot detect the clown
+	ahead of time, because clown reports no capability for this rule and has no
+	validate-only command, so this order is a hard requirement); (3) lingering for
+	the user, *loginctl enable-linger <user>* (the pair is two transient user
+	units; without a user manager that outlives logins every key is lost at the
+	last logout and announced at the next resume; a launch with no user manager at
+	all is refused naming lingering); (4) the host's *[keyholder]* configuration
+	with *mode = "off"*; (5) the operator sets *mode = "on"*.
 
 *fibby*, *piggy*
 	The absolute store paths of the two programs the pair runs, for example
