@@ -305,8 +305,10 @@ func (l *Launcher) stop(ctx context.Context, sessionKey string) error {
 	if err := l.teardown(ctx, ly); err != nil {
 		return err
 	}
-	// A pair stopped on purpose ends the session's key history; one that was
-	// merely lost keeps it, so the next mint is known to be a change.
+	// Stop is the session's own end (close, or a launch that failed after it made
+	// the pair): it ends the session's key history. A pair that was merely lost, or
+	// that the operator stopped while the session lives on (StopFoundWith with
+	// KeepHistory), keeps it, so the next mint is known to be a change.
 	if err := os.Remove(LastPath(l.Base, sessionKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("removing the key history of %s: %w", sessionKey, err)
 	}

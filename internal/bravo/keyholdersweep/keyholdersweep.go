@@ -2,6 +2,11 @@
 // from the ones nobody will ever close: units or directories whose session record
 // is gone. `sc keyholder-stop --all --dry-run` reports them and `sc clean` stops
 // them (docs/plans/2026-11-25-key-holder.md, "What off does").
+//
+// A pair is only ever swept when THIS state root recorded it. Units are per user
+// but the state root follows the caller's XDG_STATE_HOME, so a process under
+// another state root lists every pair of the account with no directory here:
+// those are classified Unowned, reported by name and never stopped by a sweep.
 package keyholdersweep
 
 import (
@@ -23,19 +28,23 @@ const OrphanMinAge = 10 * time.Minute
 type Pair struct {
 	keyholder.Found
 	// Orphan is true when no live session owns the pair and it is old enough (or
-	// has no directory at all, so no launch can be in flight).
+	// has no directory at all, so no launch can be in flight). A pair this state
+	// root did not record (Unowned) is never an orphan.
 	Orphan bool
 	// Why says, in a few words, what makes it an orphan or what keeps it.
 	Why string
 }
 
-// Classify marks each found pair as owned by a live session or an orphan. live
-// is the set of session keys with a live (not closed) record.
+// Classify marks each found pair as owned by a live session, an orphan, or not
+// this state root's at all. live is the set of session keys with a live (not
+// closed) record.
 func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duration) []Pair {
 	out := make([]Pair, 0, len(found))
 	for _, f := range found {
 		p := Pair{Found: f}
 		switch {
+		case f.Unowned:
+			p.Why = "units this state root recorded nothing for (another XDG_STATE_HOME?): not mine, never stopped by a sweep"
 		case f.Session != "" && live[f.Session]:
 			p.Why = "session " + f.Session + " is live"
 		case f.LockOnly:
@@ -79,8 +88,9 @@ var NewLauncher = func() *keyholder.Launcher {
 	return &keyholder.Launcher{Base: keyholder.StateBase(), Run: keyholder.SystemdRunner{}}
 }
 
-// Orphans finds every pair and returns the ones with no live session.
-func Orphans(ctx context.Context) ([]Pair, error) {
+// Survey finds every pair and classifies it: owned by a live session, an orphan,
+// or not this state root's.
+func Survey(ctx context.Context) ([]Pair, error) {
 	found, err := NewLauncher().Find(ctx)
 	if err != nil {
 		return nil, err
@@ -89,8 +99,18 @@ func Orphans(ctx context.Context) ([]Pair, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Classify(found, live, OrphanMinAge), nil
+}
+
+// Orphans finds every pair and returns the ones with no live session. Pairs this
+// state root did not record are never among them.
+func Orphans(ctx context.Context) ([]Pair, error) {
+	pairs, err := Survey(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var orphans []Pair
-	for _, p := range Classify(found, live, OrphanMinAge) {
+	for _, p := range pairs {
 		if p.Orphan {
 			orphans = append(orphans, p)
 		}

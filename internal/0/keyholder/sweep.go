@@ -42,6 +42,14 @@ type Found struct {
 	// file: no directory, no loaded unit. StopFound removes such a file only if
 	// no process holds the lock, and never waits for one.
 	LockOnly bool
+	// Unowned is true when systemd lists units for this hash but THIS state root
+	// recorded nothing for it: no directory, no key history, no lock file. Units
+	// are per user and the state root follows the caller's XDG_STATE_HOME, so a
+	// process that runs under another state root sees every pair of the account as
+	// unowned. Such units are somebody else's pairs, not leftovers: they are
+	// reported and never stopped, unless the operator names them with
+	// StopOptions.IncludeUnowned.
+	Unowned bool
 }
 
 // Find lists every pair under the root and every key holder unit systemd has
@@ -60,13 +68,25 @@ func (l *Launcher) Find(ctx context.Context) ([]Found, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("keyholder: reading %s: %w", l.Base, err)
 	}
+	// What this state root recorded, by name: the directories, the key histories
+	// and the lock files are the trace a pair of THIS root leaves.
+	recorded := map[string]bool{}
 	now := time.Now()
 	for _, e := range entries {
-		if !e.IsDir() || !hashRE.MatchString(e.Name()) {
+		name := e.Name()
+		switch {
+		case e.IsDir() && hashRE.MatchString(name):
+			recorded[name] = true
+		case strings.HasSuffix(name, ".last.json") && hashRE.MatchString(strings.TrimSuffix(name, ".last.json")):
+			recorded[strings.TrimSuffix(name, ".last.json")] = true
+		case strings.HasSuffix(name, ".lock") && hashRE.MatchString(strings.TrimSuffix(name, ".lock")):
+			recorded[strings.TrimSuffix(name, ".lock")] = true
+		}
+		if !e.IsDir() || !hashRE.MatchString(name) {
 			continue
 		}
-		f := get(e.Name())
-		f.Dir = filepath.Join(l.Base, e.Name())
+		f := get(name)
+		f.Dir = filepath.Join(l.Base, name)
 		if rec, ok := readRecord(filepath.Join(f.Dir, "record.json")); ok {
 			f.Session = rec.Session
 			if !rec.MintedAt.IsZero() {
@@ -111,6 +131,7 @@ func (l *Launcher) Find(ctx context.Context) ([]Found, error) {
 	out := make([]Found, 0, len(byHash))
 	for h, f := range byHash {
 		sort.Strings(f.Units)
+		f.Unowned = !recorded[h]
 		ly := l.layoutForHash(h)
 		for _, u := range []string{ly.fibbyUnit, ly.agentUnit} {
 			if act, err := l.Run.Active(ctx, u); err == nil && act {
@@ -123,13 +144,37 @@ func (l *Launcher) Find(ctx context.Context) ([]Found, error) {
 	return out, nil
 }
 
+// StopOptions says how StopFoundWith stops a pair.
+type StopOptions struct {
+	// KeepHistory keeps the session's key history and marks it stopped, so the next
+	// start of that session is known to be a change and is announced. It is for
+	// the operator's stop of a pair whose session lives on; a pair whose session
+	// is gone has nobody to announce to, and its history goes with it.
+	KeepHistory bool
+	// IncludeUnowned lets the stop act on units this state root recorded nothing
+	// for. Only the operator at a terminal, by an explicit flag, sets it.
+	IncludeUnowned bool
+}
+
+// ErrNotMine is what a stop of an unowned pair returns without IncludeUnowned.
+var ErrNotMine = errors.New("keyholder: units for this pair are not recorded under this state root (another XDG_STATE_HOME?): not mine, left running")
+
 // StopFound stops a pair found by its hash: under the same per-pair lock Start
 // and Stop take, the holder, then fibby, are stopped and seen inactive before the
 // directory is removed, and the key history is ended. Units of a pair whose
-// directory is already gone are stopped by name all the same.
+// directory is already gone are stopped by name all the same. A pair this state
+// root did not record (Found.Unowned) is refused with ErrNotMine.
 func (l *Launcher) StopFound(ctx context.Context, f Found) error {
+	return l.StopFoundWith(ctx, f, StopOptions{})
+}
+
+// StopFoundWith is StopFound with options.
+func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions) error {
 	if !hashRE.MatchString(f.Hash) {
 		return fmt.Errorf("keyholder: %q is not a pair hash", f.Hash)
+	}
+	if f.Unowned && !opts.IncludeUnowned {
+		return fmt.Errorf("%w (hash %s)", ErrNotMine, f.Hash)
 	}
 	name := f.Session
 	if name == "" {
@@ -151,11 +196,32 @@ func (l *Launcher) StopFound(ctx context.Context, f Found) error {
 		return err
 	}
 	hist := filepath.Join(l.Base, f.Hash+".last.json")
-	if err := os.Remove(hist); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if opts.KeepHistory {
+		if err := l.markStopped(hist); err != nil {
+			h.Unlock()
+			return fmt.Errorf("marking the key history %s stopped: %w", hist, err)
+		}
+	} else if err := os.Remove(hist); err != nil && !errors.Is(err, os.ErrNotExist) {
 		h.Unlock()
 		return fmt.Errorf("removing the key history %s: %w", hist, err)
 	}
 	h.Remove() // the lock file goes last, under the lock
 	l.logf("keyholder: stopped the pair %s (%s)", f.Hash, strings.TrimSpace(f.Session))
 	return nil
+}
+
+// markStopped records on a session's key history that its pair was stopped on
+// purpose, keeping the last fingerprint. A pair with no history has nothing to
+// mark.
+func (l *Launcher) markStopped(path string) error {
+	cur, ok := readLast(path)
+	if !ok {
+		return nil
+	}
+	now := time.Now()
+	if l.Now != nil {
+		now = l.Now()
+	}
+	cur.Stopped, cur.StoppedAt = true, now.UTC()
+	return writeLast(path, cur)
 }

@@ -15,13 +15,24 @@ import (
 // removed by hand and the units were left) has no session to close it: `sc clean`
 // stops those, and `sc keyholder-stop --all --dry-run` lists them. A pair that is
 // younger than keyholdersweep.OrphanMinAge with no record is a launch in flight
-// and is left alone.
+// and is left alone. Units this state root recorded nothing for belong to another
+// state root (units are per user, the state root follows XDG_STATE_HOME): `sc
+// clean` names them and never stops them.
 var (
 	findKeyholderOrphans = func() []keyholdersweep.Pair {
-		orphans, err := keyholdersweep.Orphans(context.Background())
+		pairs, err := keyholdersweep.Survey(context.Background())
 		if err != nil {
 			log.Warn("could not look for orphaned key holder pairs", "error", err)
 			return nil
+		}
+		var orphans []keyholdersweep.Pair
+		for _, p := range pairs {
+			switch {
+			case p.Orphan:
+				orphans = append(orphans, p)
+			case p.Unowned:
+				log.Warn("key holder units this state root did not record: not mine, left running (sc keyholder-stop --all --including-unowned stops them)", "hash", p.Hash, "units", p.Units)
+			}
 		}
 		return orphans
 	}

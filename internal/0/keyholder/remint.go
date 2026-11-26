@@ -44,7 +44,9 @@ type Remint struct {
 
 // last is what outlives a lost pair. It sits NEXT TO the session's pair
 // directory, not inside it, because replacing a lost pair removes that directory
-// whole; it goes only when the session's pair is stopped on purpose.
+// whole; it goes when the session's pair is stopped with the session (close) or
+// swept as an orphan. The operator's `keyholder-stop --all` of a session that
+// lives on keeps it, marked stopped, so the next start is announced.
 type last struct {
 	Fingerprint string    `json:"fingerprint"`
 	MintedAt    time.Time `json:"minted_at"`
@@ -56,6 +58,12 @@ type last struct {
 	// NoticeAt and Suppressed rate-limit the wake about a re-mint.
 	NoticeAt   time.Time `json:"notice_at,omitempty"`
 	Suppressed int       `json:"suppressed,omitempty"`
+	// Stopped and StoppedAt are set when the operator stopped the session's pair
+	// while the session lives on (`sc keyholder-stop --all`): the history stays, with
+	// the last fingerprint, so the next start is known to be a change and is
+	// announced. A new mint clears them.
+	Stopped   bool      `json:"stopped,omitempty"`
+	StoppedAt time.Time `json:"stopped_at,omitempty"`
 }
 
 // LastPath is the sidecar file of a session's key history under base.
@@ -100,6 +108,7 @@ func (l *Launcher) noteMint(sessionKey string, p Pair) (*Remint, error) {
 		cur.NoticeAt, cur.Suppressed = prev.NoticeAt, prev.Suppressed
 	} else if had {
 		cur = prev
+		cur.Stopped, cur.StoppedAt = false, time.Time{}
 	}
 	if err := writeLast(path, cur); err != nil {
 		return rm, fmt.Errorf("recording the key history of %s: %w", sessionKey, err)
@@ -139,6 +148,11 @@ type Health struct {
 	Reminted       bool
 	OldFingerprint string
 	RemintedAt     time.Time
+	// Stopped says the operator stopped the pair on purpose while the session
+	// lives on; StoppedAt is when. The next resume or restart mints a new key and
+	// announces it against Fingerprint.
+	Stopped   bool
+	StoppedAt time.Time
 	// Cert is the installed certificate as inspected (State "" when the launcher
 	// has no CertLister, so only its presence is known).
 	Cert CertInfo
@@ -148,6 +162,9 @@ type Health struct {
 // attention, or "" when there is nothing to say.
 func (h Health) Note() string {
 	switch {
+	case h.Stopped:
+		return fmt.Sprintf("keyholder: STOPPED %s by the operator (last key %s): a resume or restart mints a NEW key and announces it",
+			h.StoppedAt.UTC().Format(time.RFC3339), h.Fingerprint)
 	case h.State == "dead":
 		return "keyholder: DEAD (the pair is not running; a resume or restart mints a NEW key)"
 	case h.Reminted:
@@ -193,6 +210,7 @@ func (l *Launcher) HealthOf(ctx context.Context, sessionKey string) (Health, err
 	h := Health{State: "ok"}
 	if hasHist {
 		h.Fingerprint = hist.Fingerprint
+		h.Stopped, h.StoppedAt = hist.Stopped, hist.StoppedAt
 	}
 	if h.Fingerprint == "" && hasRec {
 		h.Fingerprint = rec.Fingerprint

@@ -58,7 +58,7 @@ func TestFindReportsALivePairADirectoryWithNoRecordAndUnitsWithNoDirectory(t *te
 	if got := by[norec]; got.Session != "" || got.Dir == "" || got.Running {
 		t.Errorf("directory with no record = %+v", got)
 	}
-	if got := by[ghost]; got.Dir != "" || len(got.Units) != 2 || !got.Running || got.Session != "" {
+	if got := by[ghost]; got.Dir != "" || len(got.Units) != 2 || !got.Running || got.Session != "" || !got.Unowned {
 		t.Errorf("units with no directory = %+v", got)
 	}
 }
