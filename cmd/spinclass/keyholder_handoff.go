@@ -47,7 +47,7 @@ func startHandoffEnvFor(child *session.State, base []string, stderr io.Writer) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving the home directory for the key holder: %w", err)
 	}
-	switchOn, err := keyholderWantsPairFn(home, child.RepoPath, true)
+	switchOn, err := keyholderWantsPairFn(home, child.RepoPath, child.Key(), true)
 	if err != nil {
 		return nil, nil, err
 	}

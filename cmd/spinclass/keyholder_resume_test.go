@@ -35,7 +35,7 @@ func stubKeyholderLaunch(t *testing.T, kh map[string]string, undo func(), err er
 	// The switch is on exactly when the stub hands out an environment: the
 	// boundary check reads it through its own seam, before any pair is started.
 	prevWants := keyholderWantsPairFn
-	keyholderWantsPairFn = func(_, _ string, _ bool) (bool, error) { return kh != nil, nil }
+	keyholderWantsPairFn = func(_, _, _ string, _ bool) (bool, error) { return kh != nil, nil }
 	t.Cleanup(func() { keyholderLaunchEnvFn = prev; keyholderWantsPairFn = prevWants })
 	return &calls
 }

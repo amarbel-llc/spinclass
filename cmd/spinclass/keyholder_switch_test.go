@@ -153,7 +153,7 @@ func TestKeyholderWantsPairReadsTheSameSwitchAsALaunch(t *testing.T) {
 	home, workRepo, engRepo := khTree(t, "", khOff, khOn)
 	khDriverIs(t, engRepo)
 	khLaunchSeams(t, false, "") // not a driver launch: a worker
-	on, err := keyholderWantsPair(home, workRepo, true)
+	on, err := keyholderWantsPair(home, workRepo, "repo/work", true)
 	if err != nil || !on {
 		t.Fatalf("keyholderWantsPair = (%v, %v), want on through the driver's context", on, err)
 	}

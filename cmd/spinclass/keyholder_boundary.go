@@ -16,8 +16,11 @@ import (
 // relaunch can be refused before any pair is started for it. Tests replace it.
 var keyholderWantsPairFn = keyholderWantsPair
 
-func keyholderWantsPair(home, repoPath string, spawned bool) (bool, error) {
-	if !keyholderPolicyFor(classifyKeyholderLaunch(spawned)).StartsPair {
+func keyholderWantsPair(home, repoPath, sessionKey string, spawned bool) (bool, error) {
+	// The session's own kind, as recorded at its first launch: the process that
+	// runs this check (a restart preflight inside a session, say) says nothing
+	// about what the session is.
+	if !keyholderPolicyFor(launchKindNow(sessionKey, spawned)).StartsPair {
 		return false, nil
 	}
 	sw, err := resolveKeyholderSwitch(home, repoPath)
@@ -67,7 +70,7 @@ func relaunchBoundaryNow(st *session.State) error {
 	if err != nil {
 		return fmt.Errorf("resolving the home directory for the key holder: %w", err)
 	}
-	on, err := keyholderWantsPairFn(home, st.RepoPath, resumeIsSpawned(st))
+	on, err := keyholderWantsPairFn(home, st.RepoPath, st.Key(), resumeIsSpawned(st))
 	if err != nil {
 		return err
 	}

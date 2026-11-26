@@ -15,6 +15,11 @@ import (
 // whether there was a pair to stop. A session that never had one costs a stat.
 var stopKeyholder = func(ctx context.Context, sessionKey string) (bool, error) {
 	base := keyholder.StateBase()
+	// The session's kind record (driver or worker) ends with it, whether or not it
+	// ever had a pair: a driver has none.
+	if err := keyholder.ForgetKind(base, sessionKey); err != nil {
+		return false, err
+	}
 	if _, err := os.Lstat(keyholder.SessionDir(base, sessionKey)); err != nil {
 		return false, nil
 	}

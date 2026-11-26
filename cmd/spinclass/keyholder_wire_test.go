@@ -102,6 +102,13 @@ func khHome(t *testing.T, body string) (home, repo string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	// Each test gets its own state root: a session's kind record (driver or
+	// worker) is written there at its first launch with the switch on, and a
+	// record left by another test for the same session key would decide this one.
+	stateRoot := filepath.Join(home, "state", "kh")
+	prevBase := keyholderStateBaseFn
+	keyholderStateBaseFn = func() string { return stateRoot }
+	t.Cleanup(func() { keyholderStateBaseFn = prevBase })
 	repo = filepath.Join(home, "work", "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)

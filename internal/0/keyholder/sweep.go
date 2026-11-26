@@ -81,6 +81,8 @@ func (l *Launcher) Find(ctx context.Context) ([]Found, error) {
 			recorded[strings.TrimSuffix(name, ".last.json")] = true
 		case strings.HasSuffix(name, ".lock") && hashRE.MatchString(strings.TrimSuffix(name, ".lock")):
 			recorded[strings.TrimSuffix(name, ".lock")] = true
+		case strings.HasSuffix(name, ".kind") && hashRE.MatchString(strings.TrimSuffix(name, ".kind")):
+			recorded[strings.TrimSuffix(name, ".kind")] = true
 		}
 		if !e.IsDir() || !hashRE.MatchString(name) {
 			continue
@@ -204,6 +206,9 @@ func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions)
 	} else if err := os.Remove(hist); err != nil && !errors.Is(err, os.ErrNotExist) {
 		h.Unlock()
 		return fmt.Errorf("removing the key history %s: %w", hist, err)
+	} else if err := os.Remove(filepath.Join(l.Base, f.Hash+".kind")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		h.Unlock()
+		return fmt.Errorf("removing the kind record of %s: %w", f.Hash, err)
 	}
 	h.Remove() // the lock file goes last, under the lock
 	l.logf("keyholder: stopped the pair %s (%s)", f.Hash, strings.TrimSpace(f.Session))

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/testgit"
@@ -29,8 +30,17 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	keyholderPasswdHomeFn = func() (string, error) { return pwHome, nil }
+	// Session kind records (driver or worker) are written under the pairs' state
+	// root at a first launch with the switch on: stand a throwaway one in, so no
+	// test writes the developer's real state.
+	khState, err := os.MkdirTemp("", "khst")
+	if err != nil {
+		panic(err)
+	}
+	keyholderStateBaseFn = func() string { return filepath.Join(khState, "kh") }
 	code := m.Run()
 	_ = os.RemoveAll(pwHome)
+	_ = os.RemoveAll(khState)
 	cleanup()
 	os.Exit(code)
 }

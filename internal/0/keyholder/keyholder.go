@@ -312,6 +312,10 @@ func (l *Launcher) stop(ctx context.Context, sessionKey string) error {
 	if err := os.Remove(LastPath(l.Base, sessionKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("removing the key history of %s: %w", sessionKey, err)
 	}
+	// The session's kind record ends with the session, like its key history.
+	if err := ForgetKind(l.Base, sessionKey); err != nil {
+		return err
+	}
 	l.logf("keyholder: stopped the pair for %s", sessionKey)
 	return nil
 }
