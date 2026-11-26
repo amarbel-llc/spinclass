@@ -1,1 +1,1 @@
-{"version":1,"principal":"%s","session_key":"%s","worktree":"%s","unit":"%s"}
+{"version":1,"principal":"@PRINCIPAL@","session_key":"@SESSION_KEY@","worktree":"@WORKTREE@","unit":"@UNIT@"}

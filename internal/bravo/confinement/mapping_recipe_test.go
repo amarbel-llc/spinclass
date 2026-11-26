@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 // The line `just debug-bridge-halves-proof` writes as the principal mapping is a
-// printf template in testdata/halves-mapping-line.json: the recipe reads that
-// file, and this test reads the same file, so there is ONE source for both.
+// template in testdata/halves-mapping-line.json (four @PLACEHOLDER@ fields,
+// substituted as plain text): the recipe reads that file, and this test reads the
+// same file, so there is ONE source for both.
 // Spinclass has no CLI that runs its confined-launch writer
 // (RecordPrincipalFromUnit runs inside `sc spawn`), so the recipe cannot call
 // it; this test keeps the template equal, once decoded, to what the real writer
@@ -27,7 +29,11 @@ func recipeMappingLine(t *testing.T, principal, key, wt, unit string) []byte {
 	if err != nil {
 		t.Fatalf("the recipe's mapping template: %v", err)
 	}
-	return []byte(fmt.Sprintf(string(bytes.TrimSuffix(tmpl, []byte("\n"))), principal, key, wt, unit) + "\n")
+	// The recipe substitutes the same four placeholders as plain text (the file is
+	// data, never a printf format string).
+	line := strings.NewReplacer("@PRINCIPAL@", principal, "@SESSION_KEY@", key, "@WORKTREE@", wt, "@UNIT@", unit).
+		Replace(string(bytes.TrimSuffix(tmpl, []byte("\n"))))
+	return []byte(line + "\n")
 }
 
 // strictMapping decodes a mapping and refuses unknown fields, so a field the

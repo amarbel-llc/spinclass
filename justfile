@@ -3497,7 +3497,15 @@ debug-bridge-halves-proof clown_bin:
       # (RecordPrincipalFromUnit runs inside `sc spawn`), so the recipe writes this one line;
       # The line's template lives in ONE file the test also reads, and
       # TestRecipeMappingLineIsWhatTheRealWriterWrites pins it to that writer's output.
-      printf "$(cat internal/bravo/confinement/testdata/halves-mapping-line.json)\n" "$principal" "$key" "$wt" "$1" >"$map"
+      # The file is DATA: its four @PLACEHOLDER@ fields are replaced as plain text, never
+      # used as a printf format string.
+      shopt -u patsub_replacement 2>/dev/null || true
+      mapline="$(cat internal/bravo/confinement/testdata/halves-mapping-line.json)"
+      mapline="${mapline//@PRINCIPAL@/$principal}"
+      mapline="${mapline//@SESSION_KEY@/$key}"
+      mapline="${mapline//@WORKTREE@/$wt}"
+      mapline="${mapline//@UNIT@/$1}"
+      printf '%s\n' "$mapline" >"$map"
       # claude's SessionStart hook, run for real (it stamps the principal into the session record).
       ( cd "$wt" && printf '{"hook_event_name":"SessionStart","session_id":"halves","source":"startup","cwd":"%s"}' "$wt" | env CLOWN_SESSION_ID="$principal" "$sc" hook >"$base/hook.out" 2>&1 ) || say "SessionStart hook exited nonzero: $(head -c 200 "$base/hook.out")"
     }
