@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 
+	"code.linenisgreat.com/spinclass/internal/0/trustedhome"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
@@ -41,6 +43,57 @@ type keyholderSwitch struct {
 // hierarchy in either context is an error (fail closed, never the operator's
 // agent).
 func resolveKeyholderSwitch(home, repoPath string) (keyholderSwitch, error) {
+	sw, err := resolveKeyholderLayers(home, repoPath)
+	if err != nil {
+		return sw, err
+	}
+	if err := applyPasswdHomeLayers(&sw, home, repoPath); err != nil {
+		return sw, err
+	}
+	return sw, nil
+}
+
+// keyholderPasswdHomeFn is the home the switch's trust anchor lives under: the
+// account database's, never the caller's environment (internal/0/trustedhome). A
+// seam for tests.
+var keyholderPasswdHomeFn = trustedhome.Home
+
+// applyPasswdHomeLayers closes the HOME half of "the caller chooses what is
+// trusted". The callers hand resolveKeyholderSwitch a home taken from $HOME, so a
+// process that starts with HOME=/somewhere/else reads the global sweatfile of
+// /somewhere/else and sees the switch off. The passwd home's layers (the global
+// file and the directories above the repo) are read as well: the switch is ON if
+// they say on, and the two program paths come from them when they set them (a
+// path the caller's own directory names may not replace the one the host wrote).
+// An account database that cannot answer fails closed: no launch.
+func applyPasswdHomeLayers(sw *keyholderSwitch, home, repoPath string) error {
+	pw, err := keyholderPasswdHomeFn()
+	if err != nil {
+		return fmt.Errorf("resolving the account's home for [keyholder]: %w (sessions are not launched until it resolves: the switch is read from the passwd home, never from $HOME alone)", err)
+	}
+	if filepath.Clean(pw) == filepath.Clean(home) {
+		return nil
+	}
+	ph, err := sweatfileio.LoadHierarchy(pw, repoPath)
+	if err != nil {
+		return fmt.Errorf("reading the sweatfiles under the account's home for [keyholder]: %w", err)
+	}
+	on, _, err := sweatfileio.TrustedKeyholderMode(ph, pw, repoPath)
+	if err != nil {
+		return fmt.Errorf("the account's home (%s): %w (sessions are not launched until it is fixed: a wrong key holder switch must not fall back to the operator's agent)", pw, err)
+	}
+	fibby, piggy, _ := sweatfileio.TrustedKeyholderTools(ph, pw, repoPath)
+	sw.On = sw.On || on
+	if fibby != "" {
+		sw.Fibby = fibby
+	}
+	if piggy != "" {
+		sw.Piggy = piggy
+	}
+	return nil
+}
+
+func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
 	var sw keyholderSwitch
 	th, err := sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {

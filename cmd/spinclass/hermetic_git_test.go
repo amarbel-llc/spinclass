@@ -21,7 +21,16 @@ func TestMain(m *testing.M) {
 	// No test may arm a real systemd timer; the restart watchdog tests stub
 	// scheduleRestartWatchFn themselves to see the argv.
 	scheduleRestartWatchFn = func([]string) error { return nil }
+	// The key holder switch reads the account's passwd home as well as the home a
+	// test passes in (keyholder_switch.go applyPasswdHomeLayers). A real account
+	// home has the developer's own sweatfiles in it; stand an empty one in.
+	pwHome, err := os.MkdirTemp("", "khpw")
+	if err != nil {
+		panic(err)
+	}
+	keyholderPasswdHomeFn = func() (string, error) { return pwHome, nil }
 	code := m.Run()
+	_ = os.RemoveAll(pwHome)
 	cleanup()
 	os.Exit(code)
 }

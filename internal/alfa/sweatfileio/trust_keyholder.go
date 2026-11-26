@@ -22,15 +22,22 @@ func ParseKeyholderMode(v string) (bool, error) {
 	return false, fmt.Errorf("[keyholder] mode %q is not valid: use \"off\" or \"on\"", v)
 }
 
-// TrustedKeyholderMode returns the [keyholder] mode honoured for the repo: a
-// scalar, the last layer above the repo that sets it wins, off when unset. The
-// key holder replaces what a session can sign with, so it is the operator's
-// switch: layers that may not set it (the repo and worktree files) are never
-// honoured, and their paths are returned in untrusted (any [keyholder] key
-// there counts, the paths too). An invalid value in a trusted layer is an
+// TrustedKeyholderMode returns the [keyholder] mode honoured for the repo: ON
+// when ANY layer above the repo says "on" (a nearer layer's "off" never undoes a
+// farther "on": the switch only narrows what a session holds), off when none
+// does. The key holder replaces what a session can sign with, so it is the
+// operator's switch: layers that may not set it (the repo and worktree files)
+// are never honoured, and their paths are returned in untrusted (any [keyholder]
+// key there counts, the paths too). An invalid value in a trusted layer is an
 // error and the answer stays off.
+//
+// What "trusted" rests on: the global file under the home passed in and every
+// sweatfile in a directory ABOVE the repo (LayerAboveRepo); those files are the
+// operator's own account's files, written by the host's configuration. A caller
+// that chooses the home, the working directory or the target repo chooses WHICH
+// of them are read; resolveKeyholderSwitch closes the home half by also reading
+// the passwd home's layers.
 func TrustedKeyholderMode(h sweatfile.Hierarchy, home, repoRoot string) (on bool, untrusted []string, err error) {
-	var value string
 	for _, src := range h.Sources {
 		if src.SkipReason != "" || !src.Found {
 			continue
@@ -42,13 +49,14 @@ func TrustedKeyholderMode(h sweatfile.Hierarchy, home, repoRoot string) (on bool
 			untrusted = append(untrusted, src.Path)
 			continue
 		}
-		if src.File.Keyholder.Mode != nil {
-			value = *src.File.Keyholder.Mode
+		if src.File.Keyholder.Mode == nil {
+			continue
 		}
-	}
-	on, err = ParseKeyholderMode(value)
-	if err != nil {
-		return false, untrusted, err
+		layerOn, perr := ParseKeyholderMode(*src.File.Keyholder.Mode)
+		if perr != nil {
+			return false, untrusted, perr
+		}
+		on = on || layerOn
 	}
 	return on, untrusted, nil
 }

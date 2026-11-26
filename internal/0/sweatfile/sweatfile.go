@@ -350,8 +350,9 @@ type Health struct {
 // only from layers above the repo, read ONLY through
 // sweatfileio.TrustedKeyholderMode, and never merged.
 type Keyholder struct {
-	// Mode is "off" or "on"; unset means off. The last trusted layer that sets
-	// it wins. Any other value is refused by sweatfileio.ParseKeyholderMode.
+	// Mode is "off" or "on"; unset means off. It is on when ANY trusted layer says
+	// on (a nearer layer's off never undoes a farther on). Any other value is
+	// refused by sweatfileio.ParseKeyholderMode.
 	Mode *string `toml:"mode"`
 
 	// Fibby and Piggy are the absolute store paths of the two programs a pair

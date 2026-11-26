@@ -105,9 +105,9 @@ func TestKeyholderSwitchFromTheGlobalFileIsOnInBothContexts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The work/ layer sets mode off AFTER the global on, so the target alone says
-	// off (the last layer wins); the driver's context, which sees only the global
-	// file, says on.
+	// The work/ layer sets mode off after the global on; on anywhere in the
+	// trusted layers wins, so the target alone says on, and so does the driver's
+	// context, which sees only the global file.
 	if !sw.On {
 		t.Error("a lower layer's off undid the global on")
 	}

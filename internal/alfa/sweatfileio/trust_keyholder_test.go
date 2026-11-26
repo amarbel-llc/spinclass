@@ -49,7 +49,8 @@ func TestTrustedKeyholderMode(t *testing.T) {
 		t.Errorf("untrusted = %v, want [%s]", untrusted, repoFile)
 	}
 
-	// The global layer turns it on; a nearer trusted layer can turn it off again.
+	// The global layer turns it on; a nearer trusted layer cannot turn it off
+	// again: on anywhere in the trusted layers wins.
 	write(global, "[keyholder]\nmode = \"on\"\n")
 	on, _, err = resolve()
 	if err != nil || !on {
@@ -57,9 +58,18 @@ func TestTrustedKeyholderMode(t *testing.T) {
 	}
 	write(parent, "[keyholder]\nmode = \"off\"\n")
 	on, _, err = resolve()
-	if err != nil || on {
-		t.Errorf("a nearer trusted off did not win: (%v, %v)", on, err)
+	if err != nil || !on {
+		t.Errorf("a nearer trusted off undid a farther on: (%v, %v)", on, err)
 	}
+	// And the other order: a farther off does not hide a nearer on.
+	write(global, "[keyholder]\nmode = \"off\"\n")
+	write(parent, "[keyholder]\nmode = \"on\"\n")
+	on, _, err = resolve()
+	if err != nil || !on {
+		t.Errorf("a nearer trusted on was hidden by a farther off: (%v, %v)", on, err)
+	}
+	write(global, "[keyholder]\nmode = \"on\"\n")
+	write(parent, "[keyholder]\nmode = \"off\"\n")
 
 	// Any other value is an error and leaves it off.
 	write(parent, "[keyholder]\nmode = \"yes\"\n")
