@@ -346,15 +346,25 @@ func TestEveryOwnershipVerdictServeToolRefusesAConfinedCallerThatOwnsNothing(t *
 func literalServeToolNames(t *testing.T) map[string]bool {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("reading the package's own sources to find conditionally registered tools: %v", err)
 	}
+	var files []*ast.File
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, perr := parser.ParseFile(fset, name, nil, 0)
+		if perr != nil {
+			t.Fatalf("parsing %s to find conditionally registered tools: %v", name, perr)
+		}
+		files = append(files, file)
+	}
 	names := map[string]bool{}
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
+	{
+		for _, file := range files {
 			ast.Inspect(file, func(n ast.Node) bool {
 				lit, ok := n.(*ast.CompositeLit)
 				if !ok {
