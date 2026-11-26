@@ -63,14 +63,14 @@ func checkRelaunchBoundary(st *session.State, switchOn bool) error {
 func relaunchBoundaryNow(st *session.State) error {
 	stateDir, err := confinement.DefaultStateDir()
 	if err != nil {
-		return keyholderNewSourceFailure(fmt.Errorf("cannot tell whether %s was launched confined (%v), so its relaunch could change what its unit binds; %s", st.Key(), err, closeCost(st)), false)
+		return keyholderNewSourceFailure(fmt.Errorf("cannot tell whether %s was launched confined (%v), so its relaunch could change what its unit binds; %s", st.Key(), err, closeCost(st)), keyholderLoadedOnViaPasswd(st.RepoPath))
 	}
 	if !confinement.LaunchedConfined(stateDir, st.WorktreePath) {
 		return nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return keyholderNewSourceFailure(fmt.Errorf("resolving the home directory for the key holder: %w", err), false)
+		return keyholderNewSourceFailure(fmt.Errorf("resolving the home directory for the key holder: %w", err), keyholderLoadedOnViaPasswd(st.RepoPath))
 	}
 	on, err := keyholderWantsPairFn(home, st.RepoPath, st.Key(), resumeIsSpawned(st))
 	if err != nil {

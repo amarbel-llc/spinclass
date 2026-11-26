@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
@@ -41,13 +42,59 @@ func isSoftKeyholderErr(err error) bool {
 	return errors.As(err, &s)
 }
 
-// keyholderEvidenceFn says whether the key holder has left state under the state
-// root: the evidence a new failure source needs before it may refuse a launch. A
-// state root that cannot be read counts as evidence (not knowing is not "no").
-// A seam for tests.
-var keyholderEvidenceFn = func() bool {
-	has, _ := keyholder.HasAnyState(keyholderStateBaseFn())
-	return has
+// keyholderEvidenceRoots are the state roots whose contents are evidence the
+// key holder is, or once was, on for this host: the one the caller's environment
+// names (XDG_STATE_HOME, else $HOME) AND the account database's home, so a caller
+// that starts a process with another XDG_STATE_HOME or an empty HOME cannot hide
+// what the host holds. A root that is not absolute (an empty HOME makes
+// keyholder.StateBase relative to the working directory) says nothing and is
+// skipped; the account's own root covers that case.
+func keyholderEvidenceRoots() []string {
+	var roots []string
+	add := func(r string) {
+		if r == "" || !filepath.IsAbs(r) {
+			return
+		}
+		r = filepath.Clean(r)
+		for _, have := range roots {
+			if have == r {
+				return
+			}
+		}
+		roots = append(roots, r)
+	}
+	add(keyholderStateBaseFn())
+	if pw, err := keyholderPasswdHomeFn(); err == nil {
+		add(filepath.Join(pw, ".local", "state", "spinclass", "keyholder"))
+	}
+	return roots
+}
+
+// keyholderEvidenceFn says whether the key holder has left state under one of
+// the state roots, and which root: the evidence a new failure source needs before
+// it may refuse a launch. A root that cannot be read counts as evidence (not
+// knowing is not "no"). A seam for tests.
+var keyholderEvidenceFn = func() (bool, string) {
+	for _, root := range keyholderEvidenceRoots() {
+		if has, _ := keyholder.HasAnyState(root); has {
+			return true, root
+		}
+	}
+	return false, ""
+}
+
+// keyholderLoadedOnViaPasswd says whether the account database's own home layers
+// say the key holder is on, for the sites that resolve the caller's HOME or state
+// directory themselves and cannot trust either: HOME empty or unset must not turn
+// "a layer says on" into "nothing says on". A refusal from the resolution counts
+// as on (not knowing is not "off"); a passwd lookup that fails says nothing.
+func keyholderLoadedOnViaPasswd(repoPath string) bool {
+	pw, err := keyholderPasswdHomeFn()
+	if err != nil || pw == "" {
+		return false
+	}
+	sw, err := resolveKeyholderSwitch(pw, repoPath)
+	return err != nil || sw.On
 }
 
 // keyholderWarnWriter is where the one-line warning goes. A seam for tests.
@@ -64,14 +111,18 @@ func keyholderWarnOnce(msg string) {
 }
 
 // keyholderNewSourceFailure decides what a failure of a NEW source does: refuse
-// (with the error) when there is evidence the switch is or was on, else warn once
-// and return nil. loadedOn is true when a layer that did load says on.
+// (with the error, and why it refused and the way out) when there is evidence the
+// switch is or was on, else warn once and return nil. loadedOn is true when a
+// layer that did load says on.
 func keyholderNewSourceFailure(err error, loadedOn bool) error {
 	if err == nil {
 		return nil
 	}
-	if loadedOn || keyholderEvidenceFn() {
-		return err
+	if loadedOn {
+		return fmt.Errorf("%w; refused because a sweatfile layer that did load says the key holder is on: fix what failed above", err)
+	}
+	if has, root := keyholderEvidenceFn(); has {
+		return fmt.Errorf("%w; refused because the key holder is or was on for this host (it has left state under %s): fix what failed above, or, with no key holder in use, run `sc keyholder-stop --all` and `sc clean` and remove %s to launch as before", err, root, root)
 	}
 	keyholderWarnOnce(err.Error())
 	return nil

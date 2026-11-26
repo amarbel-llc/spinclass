@@ -47,7 +47,7 @@ func startHandoffEnvFor(child *session.State, base []string, stderr io.Writer) (
 	if err != nil {
 		// A source this feature added: it refuses only where the key holder is on or
 		// has been; elsewhere the hand-off runs as it always did.
-		return nil, nil, keyholderNewSourceFailure(fmt.Errorf("resolving the home directory for the key holder: %w", err), false)
+		return nil, nil, keyholderNewSourceFailure(fmt.Errorf("resolving the home directory for the key holder: %w", err), keyholderLoadedOnViaPasswd(child.RepoPath))
 	}
 	switchOn, err := keyholderWantsPairFn(home, child.RepoPath, child.Key(), true)
 	if err != nil {

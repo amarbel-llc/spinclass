@@ -82,50 +82,144 @@ func TestAPasswdLookupFailureWithKeyholderStateUnderTheStateRootRefuses(t *testi
 	}
 }
 
-// The passwd home answers but a sweatfile under it does not load: a new source.
-func TestAnUnloadablePasswdHomeHierarchyWithNoEvidenceProceedsAndWithStateRefuses(t *testing.T) {
-	for _, haveState := range []bool{false, true} {
-		warn := khEvidence(t, haveState)
-		passwd := t.TempDir()
-		khGlobalAt(t, passwd, "this is = not [valid toml")
-		khPasswdHomeIs(t, passwd, nil)
-		home, workRepo, _ := khTree(t, "", "", "")
-		sw, err := resolveKeyholderSwitch(home, workRepo)
-		if haveState {
-			if err == nil {
-				t.Errorf("state present: want a refusal, got %+v", sw)
-			}
-			continue
-		}
-		if err != nil || sw.On {
-			t.Errorf("no evidence: (%+v, %v), want the switch-off result", sw, err)
-		}
-		if !strings.Contains(warn.String(), "sweatfiles under the account's home") {
-			t.Errorf("no evidence: warning = %q", warn.String())
-		}
+// The passwd home answers and a sweatfile under it EXISTS but does not load: that
+// file may be the one that switches the key holder on, so it refuses with no
+// state at all. Only an ABSENT layer is "never on".
+func TestAnExistingButUnloadablePasswdHomeLayerRefusesWithNoOtherEvidence(t *testing.T) {
+	warn := khEvidence(t, false)
+	passwd := t.TempDir()
+	khGlobalAt(t, passwd, "this is = not [valid toml")
+	khPasswdHomeIs(t, passwd, nil)
+	home, workRepo, _ := khTree(t, "", "", "")
+	if sw, err := resolveKeyholderSwitch(home, workRepo); err == nil || !strings.Contains(err.Error(), "sweatfiles under the account's home") {
+		t.Fatalf("an unloadable passwd-home layer = (%+v, %v), want a refusal naming the account's home sweatfiles", sw, err)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("a refusal also warned: %q", warn.String())
 	}
 }
 
-// The driver's own context does not load: a new source (the target repo's own
-// hierarchy was already read by every launch).
-func TestAnUnloadableDriverContextWithNoEvidenceProceedsAndWithStateRefuses(t *testing.T) {
-	for _, haveState := range []bool{false, true} {
-		warn := khEvidence(t, haveState)
-		home, workRepo, engRepo := khTree(t, "", "", "this is = not [valid toml")
-		khDriverIs(t, engRepo)
-		sw, err := resolveKeyholderSwitch(home, workRepo)
-		if haveState {
-			if err == nil || !strings.Contains(err.Error(), "driver's sweatfiles") {
-				t.Errorf("state present: err = %v, want a refusal naming the driver's sweatfiles", err)
-			}
-			continue
+// An ABSENT layer under the passwd home is "never on": nothing to load, the launch
+// is as before.
+func TestAnAbsentPasswdHomeLayerIsNeverOn(t *testing.T) {
+	khEvidence(t, false)
+	khPasswdHomeIs(t, t.TempDir(), nil)
+	home, workRepo, _ := khTree(t, "", "", "")
+	if sw, err := resolveKeyholderSwitch(home, workRepo); err != nil || sw.On {
+		t.Fatalf("an absent passwd-home layer = (%+v, %v), want the switch-off result", sw, err)
+	}
+}
+
+// The driver's own context has a layer that EXISTS but does not load: refuse (the
+// target repo's own hierarchy was already read by every launch, and still refuses).
+func TestAnExistingButUnloadableDriverLayerRefusesWithNoOtherEvidence(t *testing.T) {
+	warn := khEvidence(t, false)
+	home, workRepo, engRepo := khTree(t, "", "", "this is = not [valid toml")
+	khDriverIs(t, engRepo)
+	if sw, err := resolveKeyholderSwitch(home, workRepo); err == nil || !strings.Contains(err.Error(), "driver's sweatfiles") {
+		t.Fatalf("an unloadable driver layer = (%+v, %v), want a refusal naming the driver's sweatfiles", sw, err)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("a refusal also warned: %q", warn.String())
+	}
+}
+
+// The evidence is read from the account database's home as well as from the
+// environment's state root: a process started with another XDG_STATE_HOME cannot
+// hide what the host holds.
+func TestEvidenceIsReadFromThePasswdHomeToo(t *testing.T) {
+	warn := khEvidence(t, false) // the environment's root: empty
+	passwd := t.TempDir()
+	root := filepath.Join(passwd, ".local", "state", "spinclass", "keyholder")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "0123456789abcdef.last.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	khPasswdHomeIs(t, passwd, nil)
+	err := keyholderNewSourceFailure(errors.New("some new source failed"), false)
+	if err == nil || !strings.Contains(err.Error(), root) {
+		t.Fatalf("state under the account's home = %v, want a refusal naming %s", err, root)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("a refusal also warned: %q", warn.String())
+	}
+}
+
+// A state root that is not absolute (an empty HOME makes the environment's root
+// relative to the working directory) says nothing: it must not count as evidence
+// because the working directory happens to hold such a path.
+func TestARelativeStateRootIsNotEvidence(t *testing.T) {
+	khEvidence(t, false)
+	khPasswdHomeIs(t, t.TempDir(), nil)
+	cwd := t.TempDir()
+	rel := filepath.Join(".local", "state", "spinclass", "keyholder")
+	if err := os.MkdirAll(filepath.Join(cwd, rel), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, rel, "x"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	keyholderStateBaseFn = func() string { return rel }
+	if nerr := keyholderNewSourceFailure(errors.New("some new source failed"), false); nerr != nil {
+		t.Fatalf("a relative state root counted as evidence: %v", nerr)
+	}
+}
+
+// A refusal by evidence says so, names the state root it looked at, and the way
+// out; a refusal because a layer says on says that.
+func TestARefusalByEvidenceNamesTheStateRootAndTheWayOut(t *testing.T) {
+	khEvidence(t, true)
+	root := keyholderStateBaseFn()
+	err := keyholderNewSourceFailure(errors.New("the failure"), false)
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	for _, want := range []string{"the failure", root, "sc keyholder-stop --all", "sc clean", "remove"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q lacks %q", err, want)
 		}
-		if err != nil || sw.On {
-			t.Errorf("no evidence: (%+v, %v), want the switch-off result", sw, err)
-		}
-		if !strings.Contains(warn.String(), "driver's sweatfiles") {
-			t.Errorf("no evidence: warning = %q", warn.String())
-		}
+	}
+	err = keyholderNewSourceFailure(errors.New("the failure"), true)
+	if err == nil || !strings.Contains(err.Error(), "layer that did load says the key holder is on") {
+		t.Errorf("refusal for a layer saying on = %v", err)
+	}
+}
+
+// HOME and XDG_STATE_HOME empty: the relaunch site cannot resolve the state
+// directory, but the account's own layers say on, so the relaunch is refused
+// (the evidence did not follow the empty environment).
+func TestTheRelaunchBoundaryRefusesWhenThePasswdHomeSaysOnAndTheEnvironmentIsEmpty(t *testing.T) {
+	khEvidence(t, false)
+	passwd := t.TempDir()
+	khGlobalAt(t, passwd, khOn)
+	khPasswdHomeIs(t, passwd, nil)
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", "")
+	st := &session.State{SessionKey: "repo/b", RepoPath: t.TempDir(), WorktreePath: t.TempDir(), SessionState: session.StateInactive}
+	if err := relaunchBoundaryNow(st); err == nil || !strings.Contains(err.Error(), "cannot tell whether") {
+		t.Fatalf("relaunchBoundaryNow with the passwd home saying on = %v, want a refusal", err)
+	}
+}
+
+func TestTheStartHandoffRefusesWhenThePasswdHomeSaysOnAndTheHomeIsEmpty(t *testing.T) {
+	khEvidence(t, false)
+	passwd := t.TempDir()
+	khGlobalAt(t, passwd, khOn)
+	khPasswdHomeIs(t, passwd, nil)
+	t.Setenv("HOME", "")
+	child := &session.State{SessionKey: "repo/c", RepoPath: t.TempDir(), WorktreePath: t.TempDir(), SessionState: session.StateInactive}
+	if _, _, err := startHandoffEnvFor(child, os.Environ(), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "home directory") {
+		t.Fatalf("startHandoffEnvFor with the passwd home saying on = %v, want a refusal naming the home directory", err)
 	}
 }
 

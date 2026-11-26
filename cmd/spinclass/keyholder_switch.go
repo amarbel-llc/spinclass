@@ -44,12 +44,15 @@ type keyholderSwitch struct {
 // hierarchy in either context is an error (fail closed, never the operator's
 // agent).
 //
-// A failure of a source this feature added (the account database's home, the
-// layers under it, the driver's own context) refuses only with evidence the
-// switch is or was on for this host; otherwise it is warned once and the launch
-// proceeds as before (keyholderNewSourceFailure). A [keyholder] table that does
-// not parse or validate, and the target repo's own hierarchy not loading, still
-// refuse: the first names the key holder, the second refused before it existed.
+// The account database's home not resolving is the one failure left of a source
+// this feature added: it refuses only with evidence the switch is or was on for
+// this host (a layer that did load says on, or state under either state root);
+// otherwise it is warned once and the launch proceeds as before
+// (keyholderNewSourceFailure). A layer that EXISTS but cannot be loaded (the
+// driver's context, the account's home layers), a [keyholder] table that does not
+// parse or validate, and the target repo's own hierarchy not loading all refuse:
+// an unloadable file may be the one that switches the key holder on, and only an
+// ABSENT layer is "never on".
 func resolveKeyholderSwitch(home, repoPath string) (keyholderSwitch, error) {
 	var soft []error
 	sw, err := resolveKeyholderLayers(home, repoPath)
@@ -97,7 +100,10 @@ func applyPasswdHomeLayers(sw *keyholderSwitch, home, repoPath string) error {
 	}
 	ph, err := sweatfileio.LoadHierarchy(pw, repoPath)
 	if err != nil {
-		return softKeyholderErr(fmt.Errorf("reading the sweatfiles under the account's home for [keyholder]: %w", err))
+		// LoadHierarchy fails only for a layer that EXISTS and cannot be read or
+		// parsed (an absent layer is skipped): that file may be the one that switches
+		// the key holder on, so it refuses, with no state needed as evidence.
+		return fmt.Errorf("reading the sweatfiles under the account's home for [keyholder]: %w (a sweatfile that exists but cannot be loaded may be the layer that switches the key holder on: sessions are not launched until it is fixed or removed)", err)
 	}
 	on, _, err := sweatfileio.TrustedKeyholderMode(ph, pw, repoPath)
 	if err != nil {
@@ -134,7 +140,10 @@ func resolveKeyholderLayers(home, repoPath string) (keyholderSwitch, error) {
 	}
 	dh, err := sweatfileio.LoadHierarchy(home, driver)
 	if err != nil {
-		return sw, softKeyholderErr(fmt.Errorf("reading the driver's sweatfiles for [keyholder] (%s): %w", driver, err))
+		// An existing layer that cannot be loaded may be the one that switches the key
+		// holder on: it refuses, with no state needed as evidence (an absent layer is
+		// skipped by LoadHierarchy and is "never on").
+		return sw, fmt.Errorf("reading the driver's sweatfiles for [keyholder] (%s): %w (a sweatfile that exists but cannot be loaded may be the layer that switches the key holder on: sessions are not launched until it is fixed or removed)", driver, err)
 	}
 	dOn, _, err := sweatfileio.TrustedKeyholderMode(dh, home, driver)
 	if err != nil {
