@@ -722,6 +722,38 @@
             '';
             nativeBuildInputs = [ inputs.purse-first.packages.${system}.dagnabit ];
           };
+          # The key holder's tools are burnt into EVERY mkSpinclass build, also the
+          # shape consumers (circus) call without openssh or systemd, and an
+          # explicit null never unpins them: a deployed build once shipped with
+          # these four pins empty and the key holder refused every launch. This
+          # check reads the pins back out of the built binaries.
+          mkspinclass-pins =
+            let
+              plain = mkSpinclass { };
+              explicitNull = mkSpinclass {
+                openssh = null;
+                systemd = null;
+              };
+            in
+            pkgs.runCommand "mkspinclass-pins" { } ''
+              fail=0
+              for bin in ${plain}/bin/spinclass ${explicitNull}/bin/spinclass; do
+                for pin in \
+                  ${pkgs.systemd}/bin/systemd-run \
+                  ${pkgs.systemd}/bin/systemctl \
+                  ${pkgs.openssh}/bin/ssh-add \
+                  ${pkgs.openssh}/bin/ssh-keygen; do
+                  if grep -aqF "$pin" "$bin"; then
+                    echo "ok   $bin pins $pin"
+                  else
+                    echo "FAIL $bin does not pin $pin" >&2
+                    fail=1
+                  fi
+                done
+              done
+              [ "$fail" = 0 ] || exit 1
+              touch $out
+            '';
         }
         // batsLaneOutputs
         # Pure, sandboxed Go lint (`just lint-golangci` builds `lint`): it can't
