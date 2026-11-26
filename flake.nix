@@ -408,9 +408,17 @@
             gateNix ? null,
             gateGit ? null,
             gateSh ? null,
-            openssh ? null,
-            systemd ? null,
+            # The key holder's tools default to this package set's own and a
+            # consumer cannot unpin them: an explicit `null` means the default,
+            # never "resolve from PATH" (a deployed build once shipped without
+            # them and the key holder refused every launch).
+            openssh ? pkgs.openssh,
+            systemd ? pkgs.systemd,
           }:
+          let
+            sshPkg = if openssh == null then pkgs.openssh else openssh;
+            systemdPkg = if systemd == null then pkgs.systemd else systemd;
+          in
           pkgs.buildGoAuto {
             pname = "spinclass";
             src = ./.;
@@ -451,17 +459,17 @@
             ++ (lib.optional (gateSh != null) "-X main.gateShBin=${gateSh}/bin/sh")
             # `sc session-key` runs ssh-add and ssh-keygen against a session's holder
             # socket: pinned so the call never resolves them from the caller's PATH.
-            ++ (lib.optionals (openssh != null) [
-              "-X main.sshAddBin=${openssh}/bin/ssh-add"
-              "-X main.sshKeygenBin=${openssh}/bin/ssh-keygen"
-            ])
+            ++ [
+              "-X main.sshAddBin=${sshPkg}/bin/ssh-add"
+              "-X main.sshKeygenBin=${sshPkg}/bin/ssh-keygen"
+            ]
             # The key holder pair launcher runs `systemd-run --user` and asks about
             # units with `systemctl --user`: pinned for the same reason, and an
             # unpinned build refuses to run a unit instead of using PATH.
-            ++ (lib.optionals (systemd != null) [
-              "-X main.systemdRunBin=${systemd}/bin/systemd-run"
-              "-X main.systemctlBin=${systemd}/bin/systemctl"
-            ]);
+            ++ [
+              "-X main.systemdRunBin=${systemdPkg}/bin/systemd-run"
+              "-X main.systemctlBin=${systemdPkg}/bin/systemctl"
+            ];
 
             # godyn-only knobs (buildGodynModule).
             nativeArgs.commit = spinclassCommit;

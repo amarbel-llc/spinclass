@@ -161,7 +161,10 @@ Unlike the other pins an empty value here is NOT "resolve the name from
 *PATH*": a build without the pins (a plain *go build*, a test binary, or
 *.#spinclass-native*) refuses to start, inspect or stop a pair and says which
 pin is missing. The shipped builds (*packages.default*, *spinclass-build_go_application*)
-carry all four. A person at a terminal using such a build may pass absolute
+carry all four. *lib.mkSpinclass* defaults *openssh* and *systemd* to this
+flake's own packages and an explicit null means the default: a consumer gets the
+four pins without asking and cannot unpin them (*checks.mkspinclass-pins* reads
+them back out of the built binaries). A person at a terminal using such a build may pass absolute
 paths to the hidden *sc keyholder-pair* (*--systemd-run*, *--systemctl*, with
 *--fibby* and *--piggy*); a session launch never takes a path from a person.
 
