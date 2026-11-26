@@ -185,7 +185,7 @@ func runSessionKey(ctx context.Context, args json.RawMessage) error {
 		return fmt.Errorf("session-key: the pair's record carries no fingerprint recorded at the mint, so nothing is vouched for; run `sc keyholder-stop %s`, then `sc resume %s` starts a new pair with a new key", key, key)
 	}
 	if fp != pair.Fingerprint {
-		return fmt.Errorf("session-key: the holder's key changed since the pair started (listed %s, minted %s): refusing to print it; run `sc keyholder-stop %s`, then `sc resume %s` starts a new pair with a new key (announced)", fp, pair.Fingerprint, key, key)
+		return fmt.Errorf("session-key: the holder's key changed since the pair started (listed %s, minted %s): refusing to print it; run `sc keyholder-stop %s`, then `sc resume %s` starts a new pair with a new key (announced)", keyholder.SafeSession(fp), keyholder.SafeSession(pair.Fingerprint), key, key)
 	}
 	certPath := keyholder.CertPath(base, key)
 	cert := keyholder.InspectCert(ctx, certPath, fp, sessionKeyCertList, sessionKeyNow())
@@ -236,11 +236,11 @@ const sessionKeyVouched = "vouched only against confined sessions: an unconfined
 func certWarning(c keyholder.CertInfo, fp string) string {
 	switch c.State {
 	case keyholder.CertOtherKey:
-		return fmt.Sprintf("the installed certificate certifies another key (%s), not this session's (%s)", c.Fingerprint, fp)
+		return fmt.Sprintf("the installed certificate certifies another key (%s), not this session's (%s)", keyholder.SafeSession(c.Fingerprint), keyholder.SafeSession(fp))
 	case keyholder.CertExpired:
 		return "the installed certificate expired at " + c.Expires.UTC().Format(time.RFC3339)
 	case keyholder.CertUnreadable:
-		return "the installed certificate is unusable: " + c.Problem
+		return "the installed certificate is unusable: " + keyholder.SafeLine(c.Problem)
 	}
 	return ""
 }

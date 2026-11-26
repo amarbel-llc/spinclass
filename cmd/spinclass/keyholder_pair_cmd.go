@@ -105,7 +105,9 @@ func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
 			fmt.Fprintf(out, "not running %s\n", f.Session)
 			return nil
 		}
-		fmt.Fprintf(out, "running %s\nagent_sock %s\npublic_key %s\n", f.Session, p.AgentSock, p.PublicKey)
+		// The pair record is a file a session of the account can write: its text
+		// is printed only in its safe form.
+		fmt.Fprintf(out, "running %s\nagent_sock %s\npublic_key %s\n", keyholder.SafeSession(f.Session), keyholder.SafeLine(p.AgentSock), keyholder.SafeLine(p.PublicKey))
 	default:
 		return fmt.Errorf("keyholder-pair: action %q is not start, stop or status", f.Action)
 	}

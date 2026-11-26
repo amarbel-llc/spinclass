@@ -130,7 +130,7 @@ func runKeyholderStop(ctx context.Context, p keyholderStopParams) error {
 	}
 	if len(pairs) == 0 {
 		if wantHash != "" {
-			fmt.Fprintf(out, "no key holder pair for session %s\n", p.Session)
+			fmt.Fprintf(out, "no key holder pair for session %s\n", keyholder.SafeSession(p.Session))
 			return nil
 		}
 		fmt.Fprintln(out, "no key holder pairs")
@@ -170,14 +170,14 @@ func runKeyholderStop(ctx context.Context, p keyholderStopParams) error {
 		if pr.Unowned {
 			action = "stop-unowned"
 		}
-		rec := keyholderJournalRecord{At: operatorHandleNow(), Actor: "tty", Action: action, Hash: pr.Hash, Session: pr.Session, Result: "stopped"}
+		rec := keyholderJournalRecord{At: operatorHandleNow(), Actor: "tty", Action: action, Hash: pr.Hash, Session: keyholder.SafeSession(pr.Session), Result: "stopped"}
 		// A session that lives on keeps its key history, marked stopped: its next
 		// start is a change and is announced. An orphan has nobody to tell.
 		serr := launcher.StopFoundWith(ctx, pr.Found, keyholder.StopOptions{KeepHistory: !pr.Orphan && !pr.Unowned, IncludeUnowned: p.IncludeUnowned})
 		if serr != nil {
-			rec.Result, rec.Error = "failed", serr.Error()
+			rec.Result, rec.Error = "failed", keyholder.SafeLine(serr.Error())
 			failed = append(failed, pr.Hash)
-			fmt.Fprintf(errOut, "keyholder-stop: %s: %v\n", pr.Hash, serr)
+			fmt.Fprintf(errOut, "keyholder-stop: %s: %s\n", pr.Hash, keyholder.SafeLine(serr.Error()))
 		} else {
 			fmt.Fprintf(out, "stopped %s\n", pr.Hash)
 		}

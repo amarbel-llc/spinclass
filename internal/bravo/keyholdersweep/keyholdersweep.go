@@ -54,7 +54,7 @@ func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duratio
 		case f.Unowned:
 			p.Why = "units this state root recorded nothing for (another XDG_STATE_HOME?): not mine, never stopped by a sweep"
 		case f.Session != "" && live[f.Session]:
-			p.Why = "session " + f.Session + " is live"
+			p.Why = "session " + keyholder.SafeSession(f.Session) + " is live"
 		case f.KindOnly && liveHashes[f.Hash]:
 			p.Why = "the kind record of a live session (a driver has no pair)"
 		case f.HistoryOnly && liveHashes[f.Hash]:
@@ -79,7 +79,7 @@ func Classify(found []keyholder.Found, live map[string]bool, minAge time.Duratio
 		case f.Session == "":
 			p.Orphan, p.Why = true, "a directory with no readable record"
 		default:
-			p.Orphan, p.Why = true, "session "+f.Session+" is closed or gone"
+			p.Orphan, p.Why = true, "session "+keyholder.SafeSession(f.Session)+" is closed or gone"
 		}
 		out = append(out, p)
 	}
@@ -143,8 +143,10 @@ func Orphans(ctx context.Context) ([]Pair, error) {
 
 // Describe is a pair as one line: its hash, session and state.
 func Describe(p Pair) string {
-	session := p.Session
-	if session == "" {
+	// The session comes from record.json, which a session of the account can
+	// write: it is printed only in its safe form.
+	session := keyholder.SafeSession(p.Session)
+	if p.Session == "" {
 		session = "unknown"
 	}
 	state := "stopped"

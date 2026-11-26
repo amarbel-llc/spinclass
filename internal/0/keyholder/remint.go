@@ -164,12 +164,12 @@ func (h Health) Note() string {
 	switch {
 	case h.Stopped:
 		return fmt.Sprintf("keyholder: STOPPED %s by the operator (last key %s): a resume or restart mints a NEW key and announces it",
-			h.StoppedAt.UTC().Format(time.RFC3339), h.Fingerprint)
+			h.StoppedAt.UTC().Format(time.RFC3339), SafeSession(h.Fingerprint))
 	case h.State == "dead":
 		return "keyholder: DEAD (the pair is not running; a resume or restart mints a NEW key)"
 	case h.Reminted:
 		return fmt.Sprintf("keyholder: RE-MINTED %s, old %s, new %s: no certificate for the new key yet (sc session-key)",
-			h.RemintedAt.UTC().Format(time.RFC3339), h.OldFingerprint, h.Fingerprint)
+			h.RemintedAt.UTC().Format(time.RFC3339), SafeSession(h.OldFingerprint), SafeSession(h.Fingerprint))
 	}
 	switch h.Cert.State {
 	case CertValid:
@@ -178,11 +178,11 @@ func (h Health) Note() string {
 		}
 		return "keyholder: certificate valid until " + h.Cert.Expires.UTC().Format(time.RFC3339)
 	case CertOtherKey:
-		return fmt.Sprintf("keyholder: certificate is for ANOTHER key (%s), not this session's (%s)", h.Cert.Fingerprint, h.Fingerprint)
+		return fmt.Sprintf("keyholder: certificate is for ANOTHER key (%s), not this session's (%s)", SafeSession(h.Cert.Fingerprint), SafeSession(h.Fingerprint))
 	case CertExpired:
 		return "keyholder: certificate EXPIRED " + h.Cert.Expires.UTC().Format(time.RFC3339)
 	case CertUnreadable:
-		return "keyholder: certificate unusable: " + h.Cert.Problem
+		return "keyholder: certificate unusable: " + SafeLine(h.Cert.Problem)
 	}
 	return ""
 }

@@ -233,8 +233,8 @@ func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions)
 	if f.Unowned && !opts.IncludeUnowned {
 		return fmt.Errorf("%w (hash %s)", ErrNotMine, f.Hash)
 	}
-	name := f.Session
-	if name == "" {
+	name := SafeSession(f.Session) // from a record a session can write: shown only in this form
+	if f.Session == "" {
 		name = "pair " + f.Hash
 	}
 	wait := lockWait
@@ -274,7 +274,7 @@ func (l *Launcher) StopFoundWith(ctx context.Context, f Found, opts StopOptions)
 		return fmt.Errorf("removing the kind record of %s: %w", f.Hash, err)
 	}
 	h.Remove() // the lock file goes last, under the lock
-	l.logf("keyholder: stopped the pair %s (%s)", f.Hash, strings.TrimSpace(f.Session))
+	l.logf("keyholder: stopped the pair %s (%s)", f.Hash, SafeSession(strings.TrimSpace(f.Session)))
 	return nil
 }
 

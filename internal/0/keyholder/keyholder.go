@@ -114,10 +114,26 @@ func CertPath(base, sessionKey string) string {
 	return CertPathIn(SessionDir(base, sessionKey))
 }
 
+// logf writes one lifecycle log line. Every string or error argument is passed
+// through SafeLine first: a session key, a fingerprint or a message can come from
+// a record a session wrote, and a log line is not a place for its escape
+// sequences or newlines (a newline would forge a line of its own).
 func (l *Launcher) logf(format string, args ...any) {
-	if l.Log != nil {
-		l.Log(format, args...)
+	if l.Log == nil {
+		return
 	}
+	safe := make([]any, len(args))
+	for i, a := range args {
+		switch v := a.(type) {
+		case string:
+			safe[i] = SafeLine(v)
+		case error:
+			safe[i] = SafeLine(v.Error())
+		default:
+			safe[i] = a
+		}
+	}
+	l.Log(format, safe...)
 }
 
 func (l *Launcher) wait() time.Duration {

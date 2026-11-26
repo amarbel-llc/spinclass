@@ -38,7 +38,7 @@ var keyholderNow = func() time.Time { return time.Now().UTC() }
 // when, and what to do. held counts the wakes the rate limit held back.
 func remintMessage(sessionKey string, rm *keyholder.Remint, held int) string {
 	msg := fmt.Sprintf("the key holder of %s was LOST and replaced at %s: its key CHANGED (old %s, new %s). Every certificate for the old key is void: run `sc session-key %s` and have the new key certified again; until then the session cannot use its delegated access.",
-		sessionKey, rm.At.UTC().Format(time.RFC3339), rm.OldFingerprint, rm.NewFingerprint, sessionKey)
+		keyholder.SafeSession(sessionKey), rm.At.UTC().Format(time.RFC3339), keyholder.SafeSession(rm.OldFingerprint), keyholder.SafeSession(rm.NewFingerprint), keyholder.SafeSession(sessionKey))
 	if held > 0 {
 		msg += fmt.Sprintf(" (%d further re-mints of this session in the last %s were not announced separately.)", held, keyholder.NoticeInterval)
 	}
@@ -51,8 +51,8 @@ func remintMessage(sessionKey string, rm *keyholder.Remint, held int) string {
 // Best effort: a failed wake is logged and never fails the launch.
 func announceKeyholderRemint(l *keyholder.Launcher, sessionKey string, rm *keyholder.Remint, stderr io.Writer) {
 	fmt.Fprintf(stderr, "spinclass: the key holder of %s was lost and a NEW key was minted (old %s, new %s): every certificate for the old key is void; run `sc session-key %s` and certify the new key\n",
-		sessionKey, rm.OldFingerprint, rm.NewFingerprint, sessionKey)
-	sessionlog.Infof("keyholder: %s re-minted: old %s new %s", sessionKey, rm.OldFingerprint, rm.NewFingerprint)
+		keyholder.SafeSession(sessionKey), keyholder.SafeSession(rm.OldFingerprint), keyholder.SafeSession(rm.NewFingerprint), keyholder.SafeSession(sessionKey))
+	sessionlog.Infof("keyholder: %s re-minted: old %s new %s", keyholder.SafeSession(sessionKey), keyholder.SafeSession(rm.OldFingerprint), keyholder.SafeSession(rm.NewFingerprint))
 	send, held := l.ClaimNotice(sessionKey, keyholderNow())
 	if !send {
 		return
@@ -183,16 +183,16 @@ func keyholderNote(sessionKey string, includeOK bool) string {
 	defer cancel()
 	h, err := keyholderStatusLauncherFn().HealthOf(ctx, sessionKey)
 	if err != nil {
-		return fmt.Sprintf("keyholder: state unknown (%v)", err)
+		return fmt.Sprintf("keyholder: state unknown (%s)", keyholder.SafeLine(err.Error()))
 	}
 	if n := h.Note(); n != "" {
 		return n
 	}
 	if includeOK && h.State == "ok" {
 		if h.Cert.State == keyholder.CertNone {
-			return "keyholder: ok (" + h.Fingerprint + "), no certificate"
+			return "keyholder: ok (" + keyholder.SafeSession(h.Fingerprint) + "), no certificate"
 		}
-		return "keyholder: ok (" + h.Fingerprint + ")"
+		return "keyholder: ok (" + keyholder.SafeSession(h.Fingerprint) + ")"
 	}
 	return ""
 }
