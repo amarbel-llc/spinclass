@@ -50,8 +50,10 @@ func TestOlderServeRouteRefusesEveryEscalationForAConfinedCaller(t *testing.T) {
 			withServeClassifier(t, true)
 			beforeB := f.b.fingerprint(t)
 			text, isErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(args))
-			if !isErr || text != refusalRestartEscalation {
-				t.Errorf("got isErr=%v %q\nwant   %q", isErr, text, refusalRestartEscalation)
+			// The older route has no origin, so it does not claim the caller is
+			// inside a unit (B-L1): it names the classifier's reason.
+			if !isErr || !strings.Contains(text, "classifies as confined (unit record names the principal)") || strings.Contains(text, "inside its unit") || strings.Contains(text, "--fresh-env") {
+				t.Errorf("got isErr=%v %q\nwant the classifier's reason, no 'inside its unit', no --fresh-env", isErr, text)
 			}
 			if len(*f.handoff) != 0 {
 				t.Errorf("the hand-off ran: %+v", *f.handoff)
@@ -95,6 +97,40 @@ func TestOlderServeRouteStillQueuesAPlainRestartAndLeavesUnconfinedForceAlone(t 
 			t.Errorf("restart request = %+v, want a forced one (when=now)", rr)
 		}
 	})
+}
+
+// An UNCONFINED session whose serve cannot be classified (no serve record, two
+// live serves of the principal, an unresolvable state directory) fails closed to
+// confined, as every gated tool does on master: it is refused force, posture and
+// the displacement of another party's request, and the refusal says WHY it counts
+// as confined, never that it is inside a unit (B-L1). With the classifier saying
+// unconfined, nothing changes from master.
+func TestAnUnclassifiableServeIsRefusedWithTheClassifiersReasonNotAClaimItIsInsideAUnit(t *testing.T) {
+	f := newLiarFixture(t)
+	original := serveCallerConfined
+	t.Cleanup(func() { serveCallerConfined = original })
+	serveCallerConfined = func() (bool, string) { return true, "this serve has no record" }
+
+	text, isErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(`{"force":true}`))
+	if !isErr || !strings.Contains(text, "this serve has no record") || strings.Contains(text, "inside its unit") {
+		t.Fatalf("got isErr=%v %q, want the classifier's reason and no claim of a unit", isErr, text)
+	}
+	if len(*f.handoff) != 0 {
+		t.Errorf("the hand-off ran: %+v", *f.handoff)
+	}
+
+	// The same call over the bridge is the contract's text, unchanged.
+	btext, bErr := runHandler(handleRestartThisSession)(bridgedCtxFor(f.b.key), json.RawMessage(`{"force":true}`))
+	if !bErr || btext != refusalRestartEscalation {
+		t.Errorf("bridged: got isErr=%v %q\nwant %q", bErr, btext, refusalRestartEscalation)
+	}
+
+	// Classified unconfined: the same call is not refused by the floor.
+	serveCallerConfined = func() (bool, string) { return false, "unconfined" }
+	utext, uErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(`{"force":true,"reason":"wedged"}`))
+	if uErr || strings.Contains(utext, "classifies as confined") {
+		t.Errorf("unconfined: got isErr=%v %q, want it queued as on master", uErr, utext)
+	}
 }
 
 // queueRestartFor writes a queued restart request, by requester, on s's record.

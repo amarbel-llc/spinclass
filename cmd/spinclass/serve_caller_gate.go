@@ -78,8 +78,37 @@ func ungatedCLI[P any](run func(P) (string, error)) func(context.Context, json.R
 // it asks this instead of bridgedCall: the older serve route is a second way a
 // process inside the unit reaches the same handler and skips that hook.
 func confinedCall(ctx context.Context) bool {
-	confined, _ := confinement.ClassifyOrigin(ctx, serveCallerConfined)
+	confined, _ := confinedCallWhy(ctx)
 	return confined
+}
+
+// confinedCallWhy is confinedCall with the classifier's reason, for a refusal
+// that must say why a call without an origin counted as confined (B-L1): an
+// unconfined session whose serve cannot be classified (no serve record, two live
+// serves of the principal, an unresolvable state directory) is refused by the
+// same rule as the gated tools on master, and has to be told the true cause, not
+// that it is inside a unit.
+func confinedCallWhy(ctx context.Context) (bool, string) {
+	return confinement.ClassifyOrigin(ctx, serveCallerConfined)
+}
+
+// restartEscalationRefusal is the refusal of force, fresh_env or posture for a
+// confined caller. Over the bridge it is the contract's text. On the older serve
+// route (no origin) it names the classifier's reason, the principal and the real
+// commands, in the form of refuseConfinedServeCaller; it does not claim the
+// caller is inside a unit, because the classifier fails closed on evidence it
+// cannot read, and `--fresh-env` is not a flag of any command.
+func restartEscalationRefusal(ctx context.Context, why string) string {
+	if bridgedCall(ctx) {
+		return bridgeRestartEscalationRefusal
+	}
+	principal := os.Getenv("CLOWN_SESSION_ID")
+	if principal == "" {
+		principal = "(none)"
+	}
+	return fmt.Sprintf(
+		"restart-this-session with force or posture refused: this serve's caller (principal %s) classifies as confined (%s). A confined session holds no right to it; a holder with the right \"restart\" on this session, or the operator, runs `sc restart-child-session <session>` with --force or --posture at a terminal outside the unit (--force is always asked of the human).",
+		principal, why)
 }
 
 // refuseConfinedServeCaller returns the refusal for tool when this serve's

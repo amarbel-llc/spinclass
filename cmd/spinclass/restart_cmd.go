@@ -445,9 +445,9 @@ func handleRestartThisSession(ctx context.Context, args json.RawMessage, _ comma
 			return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	confined := confinedCall(ctx)
+	confined, why := confinedCallWhy(ctx)
 	if (p.Force || p.FreshEnv || p.Posture != "") && confined {
-		return command.TextErrorResult(bridgeRestartEscalationRefusal), nil
+		return command.TextErrorResult(restartEscalationRefusal(ctx, why)), nil
 	}
 	text, err := runRestartThisSessionFor(ctx, p, confined)
 	if err != nil {
