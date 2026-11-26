@@ -259,6 +259,9 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	// written: the spec binds the holder's socket in place of the operator's
 	// agent, so the socket must exist (kh is nil when [keyholder] is off).
 	var undoKeyholder func()
+	// The record a rollback writes for a tree it keeps, when the spawn had not
+	// got as far as writing the worker's own.
+	keptRecord := newWorkerState(rp, driver, desc, ResolvedProfile{}, "", nil)
 	var kh map[string]string
 	if KeyholderEnv != nil {
 		var undo func()
@@ -266,7 +269,7 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 		kh, undo, err = KeyholderEnv(home, repoPath, rp.SessionKey)
 		if err != nil {
 			undoOnFailure()
-			return Pending{}, refusedAfterCreate(rp, existed, createdAt, err)
+			return Pending{}, refusedAfterCreate(rp, existed, createdAt, keptRecord, err)
 		}
 		undoKeyholder = undo
 	}
@@ -278,7 +281,7 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 			undoKeyholder()
 		}
 		undoOnFailure()
-		return Pending{}, refusedAfterCreate(rp, existed, createdAt, cause)
+		return Pending{}, refusedAfterCreate(rp, existed, createdAt, keptRecord, cause)
 	}
 
 	var confine *confinedLaunch
@@ -318,13 +321,9 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 	pinned.Posture = pinnedPostureOf(unattended)
 	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, dotenv, resolved, authorizingGrant, narrowing, pinned, confine)
 	if err != nil {
-		// The spawn failed after this start created the session's key holder pair:
-		// no session will exist to close it, so stop it here.
-		if undoKeyholder != nil {
-			undoKeyholder()
-		}
-		undoOnFailure()
-		return Pending{}, err
+		// No worker was started, so no session will exist to close what this
+		// spawn made.
+		return refuse(err)
 	}
 	p.OwnKeyHolder = kh != nil
 	return p, nil
