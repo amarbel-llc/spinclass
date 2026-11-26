@@ -369,6 +369,33 @@ func TestRefuseProtectedBinds(t *testing.T) {
 	}
 }
 
+// R3-L2: the evidence directories the classification reads are protected too: a
+// spec binding any of them, or a path inside one, is refused; the deliberate
+// binds (the key holder's certificate directory, the spawn handshake) are not.
+func TestRefuseProtectedBindsCoversTheEvidenceDirectories(t *testing.T) {
+	rp := worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"}
+	state := "/state"
+	specWith := func(bind string) unitSpec {
+		return buildUnitSpec(unitSpecInput{
+			rp: rp, stateDir: state, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1",
+			env: map[string]string{}, handshakeDir: bind,
+		})
+	}
+	for _, dir := range []string{"records", "sessions", "index", "units", "principals", "serves"} {
+		for _, bind := range []string{"/state/spinclass/" + dir, "/state/spinclass/" + dir + "/x.json"} {
+			err := refuseProtectedBinds(specWith(bind), state)
+			if err == nil || !strings.Contains(err.Error(), "/state/spinclass/"+dir) {
+				t.Errorf("a bind of %s: got %v, want a refusal naming /state/spinclass/%s", bind, err, dir)
+			}
+		}
+	}
+	for _, ok := range []string{"/state/spinclass/spawn-handshake/session-ab", "/state/spinclass/keyholder/x/cert", "/state/spinclass/servesx"} {
+		if err := refuseProtectedBinds(specWith(ok), state); err != nil {
+			t.Errorf("the deliberate bind %s was refused: %v", ok, err)
+		}
+	}
+}
+
 func TestRefuseProtectedBindsFollowsSymlinks(t *testing.T) {
 	state := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(state, "circus", "issue-filer"), 0o755); err != nil {

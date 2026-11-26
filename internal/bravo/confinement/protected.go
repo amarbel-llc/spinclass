@@ -22,7 +22,19 @@ import (
 // hold the queue or forge the audit trail. Its runtime half, the ledger under
 // $XDG_RUNTIME_DIR/spinclass/host-queue, is kept out by F14, whose allowlist of
 // the operator's runtime dir does not name spinclass.
-var ProtectedStateDirs = []string{"circus", "spinclass/token-pool", "spinclass/host-queue"}
+//
+// The frontend's EVIDENCE directories are protected too (R3-L2): the session
+// records, the session index (tombstones), the unit specs and unit records, the
+// principal mappings and the serve records are what the confinement
+// classification reads (confinement.Evidence). A unit that could write them could
+// forge "unconfined" for itself, so no bind may expose them. The key holder's
+// read-only certificate directory and the spawn handshake directory are bound
+// deliberately and are neither evidence nor listed.
+var ProtectedStateDirs = []string{
+	"circus", "spinclass/token-pool", "spinclass/host-queue",
+	"spinclass/records", "spinclass/sessions", "spinclass/index",
+	"spinclass/units", "spinclass/principals", "spinclass/serves",
+}
 
 // ProtectedPaths returns the protected directories under stateDir.
 func ProtectedPaths(stateDir string) []string {
