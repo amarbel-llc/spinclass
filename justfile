@@ -3398,7 +3398,7 @@ debug-review-package name base *context:
 
 # [debug] The two real halves of the bridge against each other (FDR 0048, J-H1
 # start order): spinclass's real `spinclass serve` listener and clown's real shim
-# (`clown bridge-listen`, built from a clown checkout) in a real transient unit
+# (`clown bridge-listen`, from a PRE-BUILT clown named by the clown_bin argument) in a real transient unit
 # under clown-agent.slice, both start orders: A serves first, then the unit; B
 # starts the unit first, then serve. The launcher's writes (bridge.cgroup, the
 # unit record, the principal mapping) are made by this recipe in the documented
@@ -3409,7 +3409,7 @@ debug-review-package name base *context:
 #
 # run both real halves against each other in both start orders
 [group("debug")]
-debug-bridge-halves-proof clown_tree="/home/sasha/eng/repos/clown/.worktrees/deft-hazel":
+debug-bridge-halves-proof clown_bin:
     #!/usr/bin/env bash
     set -uo pipefail
     export LC_ALL=C
@@ -3422,8 +3422,11 @@ debug-bridge-halves-proof clown_tree="/home/sasha/eng/repos/clown/.worktrees/def
     command -v socat >/dev/null || { say "socat is needed"; exit 1; }
     out="$(nix build .#default --no-link --print-out-paths 2>/dev/null | tail -1)"
     sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built"; exit 1; }
-    cl="$(nix build --no-link --print-out-paths "path:{{ clown_tree }}#default" 2>"${TMPDIR:-/tmp}/halves-clown-build.err" | tail -1)"
-    clown="$cl/bin/clown"; [ -x "$clown" ] || { say "no clown built from {{ clown_tree }}"; tail -5 "${TMPDIR:-/tmp}/halves-clown-build.err"; exit 1; }
+    # The clown binary is a PRE-BUILT store path the operator or the clown session
+    # names: this recipe never builds a flake outside this worktree.
+    clown="{{ clown_bin }}"
+    case "$clown" in /nix/store/*/bin/clown) ;; *) say "clown_bin must be an absolute /nix/store/.../bin/clown path, got '$clown'"; exit 1;; esac
+    [ -x "$clown" ] || { say "no executable clown at $clown"; exit 1; }
     say "spinclass=$sc"; say "clown=$clown"
     base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/bh.XXXXXX")"; chmod 0700 "$base"
     ua="clown-agent-bh$$a.service"; ub="clown-agent-bh$$b.service"
