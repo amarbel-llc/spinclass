@@ -1438,14 +1438,33 @@ an agent could otherwise raise its own bound.
 ## [keyholder]
 
 The per-session key holder (docs/plans/2026-11-25-key-holder.md). Not merged:
-read only from the global and parent-directory layers, last valid one wins; a
-repo- or worktree-level table is ignored with a warning (*sc validate* warns),
-because the switch changes what a session can sign with and is the operator's.
-The target repo of a spawn is chosen by the caller, so it is read together with
-the DRIVER's own context (the repo that holds the working directory, else home)
-and the key holder is on when either says so: the target's layers cannot turn it
-off for a driver whose context has it on. If both set *fibby* or *piggy* and the
-values differ, the launch is refused.
+read only from the global and parent-directory layers; a repo- or
+worktree-level table is ignored with a warning (*sc validate* warns), because
+the switch changes what a session can sign with and is the operator's. *mode*
+is *on* when ANY of those layers says *"on"*: a nearer layer's *"off"* never
+undoes a farther *"on"*. The target repo of a spawn is chosen by the caller, so
+it is read together with the DRIVER's own context (the repo that holds the
+working directory, else home) and the key holder is on when either says so: the
+target's layers cannot turn it off for a driver whose context has it on. If both
+set *fibby* or *piggy* and the values differ, the launch is refused.
+
+*What "trusted" rests on, and the limit.* A layer is trusted when it is the
+global file under the home directory, or a sweatfile in a directory ABOVE the
+repo; these are files of the operator's own account, written by the host's
+configuration. The home is read from the passwd entry as well as from *$HOME*:
+a process started with *HOME* pointing elsewhere still has the passwd home's
+global file and the directories above the repo read, and the programs *fibby*
+and *piggy* from there win over the ones its own *HOME* names. An account
+database that cannot answer refuses the launch. What stays with the caller is
+WHICH directories lie above the repo it names and which repo is the driver's
+context: a switch the host wrote only into a parent-directory layer (for
+example *~/eng/sweatfile*) binds a launch whose target or driver context lies
+under that directory and no other. So write *mode = "on"* into the GLOBAL file
+under the passwd home (*~/.config/spinclass/sweatfile*), where it binds every
+launch whatever repo the caller names; a parent-directory layer alone is a
+limit, not a guarantee. Any process of the account can edit these files (same
+user): the switch is the operator's setting, not a boundary against a session
+that can write the operator's home.
 
 *mode*
 	*"off"* or *"on"*; unset means *"off"*. With *"on"* every WORKER session
@@ -1489,7 +1508,8 @@ values differ, the launch is refused.
 	of its own and never looks either program up on PATH: the pair holds a
 	session's key and runs outside the unit, and a name resolved from a PATH a
 	session can influence is the hole. Last layer above the repo that sets each
-	wins; a repo or worktree layer's value is ignored and reported.
+	wins, except that the passwd home's layers win over the home the caller's
+	environment names; a repo or worktree layer's value is ignored and reported.
 
 	With *mode* *"on"*, each path must be set, absolute, clean, under */nix/store*,
 	and (after following links, which must stay under the store) an executable
@@ -1527,20 +1547,37 @@ values differ, the launch is refused.
 	spawn a new one). To end every pair now, run *sc keyholder-stop --all* at a
 	terminal.
 
-	*Recovery.* *sc keyholder-stop --all --dry-run* lists every pair this user has
-	(one line each: its hash, its session, running or stopped) and marks the
-	ORPHANS: pairs with no live session, which nothing will ever close (a record
-	that vanished, a close with *--force* that left units running, a directory
-	removed by hand with both units still loaded). It needs no terminal. *sc
-	keyholder-stop --all* stops them all, holder first, then fibby, and removes a
-	pair's directories only after both units are inactive; it needs a terminal,
-	journals each stop to *$XDG_STATE_HOME/spinclass/keyholder-journal.ndjson*
-	with actor *tty*, and needs neither the switch nor the *fibby* and *piggy*
-	paths, so it still works after the host's configuration is gone. *sc clean*
-	stops the orphans only (a pair younger than ten minutes with no record is a
-	launch in flight and is left alone). A stopped pair's session keeps running
-	without a holder; its next resume or restart starts a new pair and mints a new
-	key if the switch is on. Two starts or stops of one session are serialised
+	*Recovery.* *sc keyholder-stop --all --dry-run* lists every pair (one line
+	each: its hash, its session, running or stopped) and marks the ORPHANS: pairs
+	with no live session, which nothing will ever close (a record that vanished, a
+	close with *--force* that left units running, a directory removed by hand with
+	both units still loaded), and the ones that are NOT MINE. It needs no terminal.
+	*sc keyholder-stop --all* stops every pair this state root recorded, holder
+	first, then fibby, and removes a pair's directories only after both units are
+	inactive; it needs a terminal, journals each stop to
+	*$XDG_STATE_HOME/spinclass/keyholder-journal.ndjson* with actor *tty*, and
+	needs neither the switch nor the *fibby* and *piggy* paths, so it still works
+	after the host's configuration is gone. *sc clean* stops the orphans only (a
+	pair younger than ten minutes with no record is a launch in flight and is left
+	alone).
+
+	*Whose pairs these are.* Units are per user, but the state directory follows
+	*$XDG_STATE_HOME*, so a shell with another state home sees every pair of the
+	account as units with no directory. A pair counts as this state root's only
+	when it has a directory, a key history or a lock file under
+	*$XDG_STATE_HOME/spinclass/keyholder*. Any other unit is NOT MINE: *sc clean* names it and
+	leaves it running, and *sc keyholder-stop --all* lists it, says it is left
+	running, and stops it only with *--including-unowned*, after listing what it
+	will also stop (journalled as *stop-unowned*). To stop the pairs of another
+	state home, run the command under that state home.
+
+	*A session that lives on.* *sc keyholder-stop --all* of a pair whose session
+	is still live keeps the session's key history, marked stopped with the last
+	fingerprint: *sc list* and *session-health* say STOPPED, and the next resume
+	or restart mints a new key and announces it against the stopped one, exactly
+	as for a lost pair. The history of an orphan, and of a pair stopped by *sc
+	close*, goes with the pair. A stopped pair's session keeps running without a
+	holder until then. Two starts or stops of one session are serialised
 	by a lock file, *$XDG_STATE_HOME/spinclass/keyholder/<hash>.lock*; the second
 	waits up to a minute and then fails naming the lock. Stopping a pair removes
 	its lock file too, as the very last step and under the lock itself (a waiter
@@ -1578,8 +1615,8 @@ values differ, the launch is refused.
 	<session>* when a session's pair is stopped, and *stopped the pair <hash>
 	(<session>)* for one swept by *sc clean* or *sc keyholder-stop*.
 
-	*A changed key.* A pair that is lost (the units gone after a reboot or a
-	stop, the holder restarted) mints a NEW key: keys live only in fibby's memory
+	*A changed key.* A pair that is lost (the units gone after a reboot or an
+	operator's stop, the holder restarted) mints a NEW key: keys live only in fibby's memory
 	and are never written down. Every certificate for the old key is void; *sc
 	session-key SESSION* shows the new key and *sc list* shows *RE-MINTED* until a
 	certificate for it is installed. *sc session-key* itself refuses to print a key

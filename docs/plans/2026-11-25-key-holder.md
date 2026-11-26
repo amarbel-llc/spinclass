@@ -163,8 +163,11 @@ remint.go`, `cmd/spinclass/keyholder_remint.go`):
 - The pair package records the key's SHA256 fingerprint at the mint, and keeps a
   key history `<state>/spinclass/keyholder/<hash>.last.json` NEXT TO the session
   directory, not inside it (replacing a lost pair removes the directory whole).
-  A deliberate stop (`sc close`, a failed launch's undo) ends the history; a lost
-  pair does not, so the next mint is known to be a change.
+  The session's own end (`sc close`, a failed launch's undo) ends the history;
+  a lost pair does not, and neither does the operator's `sc keyholder-stop --all`
+  of a session that lives on (the history is kept, marked `stopped` with the time
+  and the last fingerprint), so the next mint is known to be a change and is
+  announced. The history of an orphan goes with the pair.
 - Every path that replaces a pair (start, resume, spawn, the start hand-off, the
   restart preflight) comes through one function, which prints the old and new
   fingerprint on stderr, writes the lifecycle log, and wakes the session's
@@ -248,8 +251,9 @@ cannot write.
   The pairs of existing sessions run until their session closes; `sc close`
   stops a pair whatever the switch says. A confined session spawned with a holder
   is refused on resume (a changed agent is a changed boundary: close and respawn).
-- **`sc keyholder-stop --all [--dry-run]`** is the remedy: it stops every pair
-  this user has, by unit name and by directory, holder first, directories only
+- **`sc keyholder-stop --all [--dry-run] [--including-unowned]`** is the remedy:
+  it stops every pair THIS STATE ROOT recorded (see "Whose pairs these are"),
+  by unit name and by directory, holder first, directories only
   after both units are inactive, journalled to
   `<state>/spinclass/keyholder-journal.ndjson` with actor `tty` (a journal that
   cannot be written warns and the stop still happens: stopping is the safe
@@ -257,7 +261,9 @@ cannot write.
   and needs none. It needs neither the switch nor the trusted paths, so it works
   after the host's configuration is gone.
 - **Orphans** are pairs with no live session: a directory with no readable
-  record, units with no directory, a record naming a closed or vanished session.
+  record, units with no directory but a key history or lock file under this
+  state root, a record naming a closed or vanished session (units with NO trace
+  under this state root are another state root's, not orphans).
   A pair with no live session that is younger than ten minutes is a launch in
   flight (the pair starts before the session record is written) and is not an
   orphan. `sc clean` stops orphans; `sc keyholder-stop --all --dry-run` marks
@@ -275,6 +281,31 @@ cannot write.
   unreadable hierarchy or an invalid mode in either context refuses the launch
   (never the operator's agent). The boundary check on a relaunch reads the same
   resolved switch (`cmd/spinclass/keyholder_switch.go`).
+- **What "trusted" rests on (round 2, A-M1).** A layer is trusted when it is the
+  global file under the home directory or a sweatfile in a directory ABOVE the
+  repo (`sweatfileio.LayerAboveRepo`): files of the operator's own account,
+  written by the host's configuration. Two things the caller used to choose and
+  now does not: (1) the mode is ON when ANY trusted layer says on (a nearer
+  layer's off never undoes a farther on; `sweatfileio.TrustedKeyholderMode`);
+  (2) the home is not taken from `$HOME` alone: `resolveKeyholderSwitch` reads
+  the passwd home's layers too (`internal/0/trustedhome`), the switch is on if
+  they say on, and the programs `fibby` and `piggy` from them win over the ones
+  the caller's own home names; an account database that cannot answer refuses
+  the launch. What the caller still chooses: which directories lie above the repo
+  it names, and which repo is the driver's context. So a switch the host wrote
+  only into a parent-directory layer (`~/eng/sweatfile`) binds a launch whose
+  target or driver context is under that directory and no other; the host must
+  write `mode = "on"` into the GLOBAL file under the passwd home to bind every
+  launch. And every file here is writable by any process of the same account: the
+  switch is the operator's setting, not a boundary against a session that can
+  write his home.
+- **Whose pairs these are (round 2, B-H1).** Units are per user, the state root
+  follows `$XDG_STATE_HOME`. `Find` marks a hash `Unowned` when this root has no
+  directory, key history or lock file for it; an unowned pair is never an orphan,
+  `StopFound` refuses it (`ErrNotMine`), `sc clean` names it and leaves it, and
+  `sc keyholder-stop --all` stops it only with `--including-unowned`, after
+  listing it (journalled `stop-unowned`). A hand-removed directory AND history
+  AND lock leave the units "not mine" too: `--including-unowned` is the way out.
 
 ## Later
 
