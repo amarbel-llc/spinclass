@@ -12,12 +12,16 @@ import (
 )
 
 // AgentBoundaryError is the refusal of a relaunch whose stored unit spec does not
-// match the key holder switch as it is NOW. clown re-reads the stored spec on
-// every relaunch (a resume, a restart in place, a start hand-off) and refuses it
-// when the spec's boundary changed; the agent socket is part of that boundary, so
-// a changed agent is a changed boundary and the honest answer is a new session.
-// spinclass refuses first, before clown is called and before any pair is started
-// for the relaunch, and says what to do.
+// match the key holder switch as it is NOW. clown re-reads the stored spec FILE
+// on every relaunch (a resume, a restart in place, a start hand-off) and compares
+// its boundary digest with the one it recorded at the last confined launch; an
+// UNCHANGED file always matches, so clown relaunches a stale spec (one that still
+// binds the operator's agent after the switch went on) without a word. Its gate
+// refuses only a file REPLACED in place with other socket purposes. So this check
+// is the ONLY wall against a changed agent: the agent socket is part of the
+// boundary, a changed agent is a changed boundary, and the honest answer is a new
+// session. spinclass refuses before clown is called and before any pair is
+// started for the relaunch, and says what to do.
 type AgentBoundaryError struct {
 	// Worktree is the confined worktree whose spec was checked.
 	Worktree string
@@ -36,7 +40,7 @@ func (e *AgentBoundaryError) Error() string {
 	if e.SwitchOn {
 		mode = "on"
 	}
-	msg := fmt.Sprintf("the stored unit spec of %s binds %s, but [keyholder] mode is now %q: a changed agent socket is a changed boundary, and clown refuses to relaunch a session whose boundary changed (its own text is \"a changed spec means a new session\": this is the same refusal, made before clown is called; the operator's agent is never rebound to a session started on its own key, nor a dead holder path to one started without)",
+	msg := fmt.Sprintf("the stored unit spec of %s binds %s, but [keyholder] mode is now %q: a changed agent socket is a changed boundary, and a session keeps the boundary it was spawned with. clown relaunches the stored spec as it is, so this check is what stops the old agent from continuing (clown's own gate refuses only a spec file replaced in place with other socket purposes, with its text \"a changed spec means a new session\"); the operator's agent is never rebound to a session started on its own key, nor a dead holder path to one started without",
 		e.Worktree, e.Stored, mode)
 	if e.Detail != "" {
 		msg += " (" + e.Detail + ")"
