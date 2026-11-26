@@ -330,7 +330,15 @@ func queueRestartPostureAs(st *session.State, requester, principal, reason strin
 		Posture:     posture,
 	}
 	var displaced *session.RestartRequest
+	var stoppedUnderLock *session.State
 	if err := updateLoadedSession(st, func(cur *session.State) bool {
+		// The stopped check above read st outside the lock: a stop that landed since
+		// would be queued over. Check the locked copy too (R3-L1).
+		if confinedCaller && cur.StoppedAt != nil {
+			stopped := *cur
+			stoppedUnderLock = &stopped
+			return false
+		}
 		if confinedCaller && cur.RestartRequest != nil && cur.RestartRequest.Requester != principal {
 			req := *cur.RestartRequest
 			displaced = &req
@@ -340,6 +348,9 @@ func queueRestartPostureAs(st *session.State, requester, principal, reason strin
 		return true
 	}); err != nil {
 		return "", fmt.Errorf("recording the restart request: %w", err)
+	}
+	if stoppedUnderLock != nil {
+		return "", stoppedSessionRefusal("restart-this-session", stoppedUnderLock)
 	}
 	if displaced != nil {
 		return "", pendingRequestRefusal("restart-this-session", *displaced)
