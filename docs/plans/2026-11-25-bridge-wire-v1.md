@@ -285,7 +285,11 @@ spawn and `sc validate` reports it). The field's values:
   environment variables are set to the empty string, serve does nothing.
   `"off"` in the knob is the same OFF and the field is omitted.
 - `"offered"`: the bridge is ON. The launch goes on without a bridge when one
-  cannot be set up, and clown's result says `bridge: off:<reason>`.
+  cannot be set up, and clown's result says `bridge: off: <reason>` (one space
+  after the colon). The result's `bridge` field is exactly one of: absent (the
+  bridge was not asked for, or a clown that predates the field), `recorded`
+  (set up, the cgroup file written), or `off: <reason>`. Clown no longer writes
+  `on`.
 - `"required"`: the bridge is ON, and clown refuses the launch when it cannot be
   set up (and, with the shim's `control` not held, refuses it).
 
@@ -356,7 +360,13 @@ unit record needs the provider, the provider needs the shim's `control`, and
    `/clown-agent.slice/<CLOWN_BRIDGE_UNIT>` (the unit comes from the
    environment; no unit record is read). Until the file is valid the answer is
    `ERR refused`.
-6. The shim reports ready; clown starts the provider.
+6. The shim reports ready with one line, `bridge-listen: ready control` when it
+   holds `control` or `bridge-listen: ready down` when it does not; clown
+   starts the provider. After the 15 s window without `control` the shim is
+   marked unusable (its failure text is the `unusable` form below). With `required`
+   and `control` not held the unit's provider is never started (clown's
+   `ShimExitRefused`); with `offered` it starts and the shim says the text on
+   each call.
 7. Clown writes the unit record (its result file) once the provider has
    started.
 8. The spawn's hello writes the principal mapping from the unit record. The
@@ -391,12 +401,13 @@ The shim (clown's) acts per reply, by code only:
 | Reply | On `control` | On a data stream |
 | --- | --- | --- |
 | `ERR version` | the bridge is down | the bridge is down |
-| `ERR busy`, `ERR refused` | retried for a 15 s window (100 ms, doubling to 1 s); the first connect also tries three times, 200 ms apart, on an unreachable or busy bridge | said to that client; the stream fails, the bridge stays up |
+| `ERR busy`, `ERR refused` | retried in ONE loop for a 15 s window, 100 ms doubling to 1 s, on an unreachable socket, `busy` or `refused` alike (no other retry exists); a window that ends without `control` marks the shim unusable | said to that client at once, no retry; the stream fails, the bridge stays up |
 | `ERR unknown-service`, `ERR error` | said to that client; final, the bridge stays up | said to that client; the bridge stays up |
-| connect failed, EOF, no reply in time | retried as above | the call fails; with `control` held only that connection fails, without it the shim marks the bridge down |
+| connect failed, EOF, no reply in time | retried as above (the same one loop) | the call fails at once, with no retry; with `control` held only that connection fails, without it the shim marks the bridge down |
 
 A failed data dial fails only that connection while `control` is held. The end
-of `control` is the bridge being down.
+of `control` is the bridge being down. The retry loop is for `control` only: a
+data stream dials once and fails the connection.
 
 ## Failure text
 
@@ -406,6 +417,27 @@ stream, no reply within the timeout) it MUST fail the call at once with
 and MUST NOT retry silently or fall back to a direct path. (The retries above
 are the shim's connect attempts before the bridge is declared down, not a
 fallback.)
+
+This `down` form stays for the bridge being unreachable (no socket, refused
+connect, closed stream, no reply) and for an ended `control` stream. When the
+frontend answered, or the socket was reachable, but the bridge cannot be used,
+the shim MUST say the second fixed form instead, the `unusable` form
+(`bridge.UnusableMessage`, vector op `unusable-message`):
+`clown: the bridge is unusable (<reason>); no tool or model call can leave this session; check the serve's log and spinclass session-health, and that the session's bridge setting matches the serve's`.
+It is used for exactly two things: an `ERR version` on `control` or on a data
+stream (the reason is the server's text, `version: server=N shim=M: <hint>`),
+and a `control` stream not admitted within the retry window (the reason is the
+last refusal text). The `<reason>` is printed on one line: every control rune,
+every format rune (the bidi overrides among them), the unicode line and
+paragraph separators and every byte that is not valid UTF-8 becomes one space,
+and what remains is cut at a rune boundary to at most 200 bytes and ends in
+`...` when cut (`MaxUnusableReasonBytes`). The `down` form applies no bound of
+its own: its reasons are the shim's own fixed strings.
+
+Where the text goes: a unix endpoint cannot carry it to its client (the shim
+closes the connection, and the line goes to the shim's terminal log, rate
+limited to one a second); only a tcp endpoint carries it, as the body of its
+503 answer.
 
 ## Egress (extension, NOT step 1, not built)
 
@@ -442,7 +474,9 @@ binds, and a rule for an absent owner (`ERR error`, never a held fd).
   `[bridge] enable`, are gone with the second switch.
 - The down-message wording (B-L5) is the vector's and this contract's: clown
   does not change it alone. A wording that names a local cause is a new vector
-  first.
+  first; the `unusable-message` vector is that for a bridge that answered but
+  cannot be used (J-M3), added at coco's proposal. `down` stays for an
+  unreachable bridge and an ended `control` stream.
 - A counter for refused connections on clown's side (B-M6) is not built by
   clown; the refusal is logged there, rate limited, and counted by the frontend
   as `spinclass.bridge.unknown.refused` (a peer refused before its hello has named
@@ -519,7 +553,11 @@ most once a minute.
 `ok`, `code`, `text`, and `rest`), `format-err` (code and text in; expect the
 reply line), `socket-path` (`dir` or `dir_gen` in; expect `path`/`path_gen`
 and, when given, `path_len`, or `path_err` of `too-long` or `empty`),
-`down-message` (`reason` in; expect `message`) and `constants` (the values both
+`down-message` (`reason` in; expect `message`), `unusable-message` (`reason`
+or `reason_gen` in; expect `message` or `message_gen`: the cases show the
+control, format and separator runes turned into spaces and the 200 byte cut at a
+rune boundary; the byte that is not valid UTF-8 cannot be written in a JSON
+file and is a Go test) and `constants` (the values both
 sides share: the socket name, the three variable names, the byte limits, the
 hello timeout in ms, the major, the version hint, the reserved labels and the
 reply codes; a side's own constants MUST equal them). `parse_err` is
@@ -528,8 +566,14 @@ given as a `*_gen` object `{prefix, repeat, n, suffix}`. `served` defaults to
 all eight reserved labels. Both implementations MUST pass every case.
 `vectors.json.sha256` holds `sha256sum` output; a vendored copy MUST match it,
 and a change to the file MUST change the digest and bump this text. The file
-has 82 array entries (a test run reports more than that, one per subtest and
-helper case: count entries, not test lines).
+has 92 array entries (a test run reports more than that, one per subtest and
+helper case: count entries, not test lines); its sha256 is
+`d585f2f0cb2bfd4030b5e792eda49233a1e9d1c259ac475c6c1eca8788911b7c`. The first
+82 entries are byte-identical to the previous revision of the file; the ten
+`unusable-message` entries are the only addition, and they use two new `_gen`
+fields, `reason_gen` and `message_gen` (the same `{prefix, repeat, n, suffix}`
+object as the other `*_gen` fields), for the long cases. A vendored runner MUST
+read them.
 
 ### Admission vectors
 
