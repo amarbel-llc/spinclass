@@ -15,11 +15,25 @@ import (
 // keyholderPairOut is the command's output stream; tests replace it.
 var keyholderPairOut = func() io.Writer { return os.Stdout }
 
+// keyholderPairRecipeEnv is the variable the live recipes (and only they) set to
+// run start and stop without a terminal. It is NOT a boundary: any process of the
+// account can set it, as any can run `systemd-run --user` itself. It keeps the
+// plain call, a script, a driven agent and an accident out of a command that can
+// replace a session's holder (A-H1); between unconfined sessions of one account
+// there is no wall (docs/plans/2026-11-25-key-holder.md, "Stated limits").
+const keyholderPairRecipeEnv = "SPINCLASS_KEYHOLDER_PAIR_RECIPE"
+
+// keyholderPairRecipe reports whether a live recipe called the command; a var so
+// a test can aim it.
+var keyholderPairRecipe = func() bool { return os.Getenv(keyholderPairRecipeEnv) == "1" }
+
 // registerKeyholderPairCommand registers the hidden `sc keyholder-pair`: start,
 // stop or report a session's key holder pair by hand, for the live proof
 // (`just debug-keyholder-pair-live`). It ignores the [keyholder] switch, which
 // only governs what a session launch does on its own, and never touches a
-// session's record or environment.
+// session's record or environment. Start and stop are the operator's act: they
+// need stdin and stdout on a terminal, or the recipes' variable (status only
+// reads and needs neither).
 func registerKeyholderPairCommand(app *command.App) {
 	app.AddCommand(&command.Command{
 		Name:   "keyholder-pair",
@@ -55,6 +69,9 @@ func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
 	}
 	if f.Session == "" {
 		return errors.New("keyholder-pair: --session is required")
+	}
+	if (f.Action == "start" || f.Action == "stop") && !operatorHandleIsTerminal() && !keyholderPairRecipe() {
+		return fmt.Errorf("keyholder-pair: %s replaces or ends a session's key holder: stdin and stdout must both be terminals (the live recipes set %s=1); `sc session-key` says why the key it prints is vouched only against confined sessions", f.Action, keyholderPairRecipeEnv)
 	}
 	launcher := func() (*keyholder.Launcher, error) { return keyholderLauncherFn(keyholder.Tools{}) }
 	if f.Fibby != "" || f.Piggy != "" {

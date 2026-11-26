@@ -2105,7 +2105,8 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     s="{{ session }}"
     stopped=0
     # The launcher never looks a program up on PATH: name both explicitly (absolute paths).
-    pair() { "$sc" keyholder-pair --fibby "$fibby" --piggy "$piggy" "$@"; }
+    # Without a terminal the command refuses start and stop unless a recipe says it is one (not a boundary: see the manpage).
+    pair() { SPINCLASS_KEYHOLDER_PAIR_RECIPE=1 "$sc" keyholder-pair --fibby "$fibby" --piggy "$piggy" "$@"; }
     cleanup() {
       [ "$stopped" = 1 ] || pair --action stop --session "$s" >/dev/null 2>&1 || true
       rm -rf "$base"
@@ -2123,6 +2124,12 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     pair --action start --session "$s" >"$base/start2.out" 2>&1
     if cmp -s "$base/start.out" "$base/start2.out"; then say "second start: same pair, same key (idempotent)"; else say "FAIL: second start differs"; sed 's/^/live:   /' "$base/start2.out"; exit 1; fi
     say "status: $(pair --action status --session "$s" 2>&1 | head -1)"
+    # The holder's unit is bound to fibby's (BindsTo=): stop fibby alone and the agent must go with it.
+    fu="$(sed -n 's/^fibby_unit //p' "$base/start.out")"; au="$(sed -n 's/^agent_unit //p' "$base/start.out")"
+    systemctl --user stop "$fu" >/dev/null 2>&1 || true
+    tied=no; for _ in 1 2 3 4 5 6 7 8 9 10; do systemctl --user is-active --quiet "$au" || { tied=yes; break; }; sleep 0.5; done
+    say "fibby stopped alone: the agent unit stopped with it: $tied"
+    [ "$tied" = yes ] || { say "FAIL: the agent unit outlived fibby (BindsTo= missing?)"; exit 1; }
     pair --action stop --session "$s"; rc=$?; stopped=1
     say "stop rc=$rc"
     sleep 1
@@ -2160,7 +2167,7 @@ debug-session-key-capture fibby="" piggy="":
     mkdir -m 0700 "$base/state" "$base/home" "$base/config"
     export HOME="$base/home" XDG_STATE_HOME="$base/state" XDG_CONFIG_HOME="$base/config" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
     unset SSH_AUTH_SOCK PIGGY_AUTH_SOCK SPINCLASS_SESSION_ID CLOWN_SESSION_ID
-    pair() { "$sc" keyholder-pair --fibby "$fibby" --piggy "$piggy" "$@"; }
+    pair() { SPINCLASS_KEYHOLDER_PAIR_RECIPE=1 "$sc" keyholder-pair --fibby "$fibby" --piggy "$piggy" "$@"; }
     key=""
     cleanup() { [ -z "$key" ] || pair --action stop --session "$key" >/dev/null 2>&1 || true; rm -rf "$base"; }
     trap cleanup EXIT

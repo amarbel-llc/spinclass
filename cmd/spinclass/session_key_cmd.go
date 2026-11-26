@@ -116,7 +116,7 @@ func registerSessionKeyCommand(app *command.App) {
 		Description: command.Description{
 			Short: "Print a session's key holder public key and fingerprint",
 			Long: "Prints exactly two lines on stdout: the public key line exactly as the session's holder lists it (authorized_keys form) and its SHA256 fingerprint. " +
-				"With --json: {session, public_key, fingerprint, cert_path, cert_expires, cert_matches_key, cert_problem}; session is always the canonical session key (<repo>/<branch>), whatever form was passed. cert_path is where the certificate is installed (write then rename, into its directory only); " +
+				"With --json: {session, public_key, fingerprint, cert_path, cert_expires, cert_matches_key, cert_problem, vouched}; vouched is always the sentence \"" + sessionKeyVouched + "\" (text mode prints it on stderr): the record the key is checked against is a file beside the holder's socket, and any unconfined session of this account could have replaced a holder and written it, so the printed key is vouched for only against confined sessions; session is always the canonical session key (<repo>/<branch>), whatever form was passed. cert_path is where the certificate is installed (write then rename, into its directory only); " +
 				"cert_expires (UTC) and cert_matches_key are read from the installed file with ssh-keygen and are null until one is installed; cert_problem says why an installed file is unusable. " +
 				"A certificate for another key, an expired one or an unusable one is a warning on stderr; stdout stays the two lines. " +
 				"Fails with exit 1 when the session has no holder, its holder is not running, the socket lists more than one key, the listed line is not one clean key line (over 4 KiB, a control or format character, a type other than ssh-ed25519 and ecdsa-sha2-nistp256, a blob that is not base64), or the listed key is not the one spinclass recorded when it minted the pair (\"the holder's key changed since the pair started\"). " +
@@ -212,11 +212,24 @@ func runSessionKey(ctx context.Context, args json.RawMessage) error {
 			CertExpires    *time.Time `json:"cert_expires"`
 			CertMatchesKey *bool      `json:"cert_matches_key"`
 			CertProblem    *string    `json:"cert_problem"`
-		}{key, pub, fp, certPath, expires, matches, problem})
+			Vouched        string     `json:"vouched"`
+		}{key, pub, fp, certPath, expires, matches, problem, sessionKeyVouched})
 	}
+	fmt.Fprintln(sessionKeyErr(), "session-key: "+sessionKeyVouched)
 	fmt.Fprintf(out, "%s\n%s\n", pub, fp)
 	return nil
 }
+
+// sessionKeyVouched says, in the command's own output, who could have written
+// the record the printed key is checked against (A-H1). The fingerprint spinclass
+// recorded at the mint is a file beside the holder's socket, a live pair is
+// adopted as it stands, and `sc keyholder-pair` starts and stops pairs: any
+// unconfined session of the same account can replace another session's holder,
+// confined or not, and write a record that matches. Between unconfined sessions
+// of one account there is no wall, so no file-based record can be trusted against
+// them; this is a stated limit, not a check that passed. The line is the same
+// whatever the record says: it names who the printed key is NOT vouched against.
+const sessionKeyVouched = "vouched only against confined sessions: an unconfined session of this account could have written this record"
 
 // certWarning is the stderr line for an installed certificate that is not a
 // current certificate for the session's key, or "".

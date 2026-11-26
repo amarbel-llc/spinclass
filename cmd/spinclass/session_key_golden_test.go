@@ -52,6 +52,7 @@ func TestTheJSONGoldenHasExactlyTheDocumentedFieldsInTheDocumentedShapes(t *test
 		CertExpires    *time.Time `json:"cert_expires"`
 		CertMatchesKey *bool      `json:"cert_matches_key"`
 		CertProblem    *string    `json:"cert_problem"`
+		Vouched        string     `json:"vouched"`
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -62,13 +63,16 @@ func TestTheJSONGoldenHasExactlyTheDocumentedFieldsInTheDocumentedShapes(t *test
 	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"session", "public_key", "fingerprint", "cert_path", "cert_expires", "cert_matches_key", "cert_problem"} {
+	for _, f := range []string{"session", "public_key", "fingerprint", "cert_path", "cert_expires", "cert_matches_key", "cert_problem", "vouched"} {
 		if _, present := generic[f]; !present {
 			t.Errorf("the golden lacks the field %q", f)
 		}
 	}
-	if len(generic) != 7 {
-		t.Errorf("the golden has %d fields, want exactly 7: %v", len(generic), generic)
+	if len(generic) != 8 {
+		t.Errorf("the golden has %d fields, want exactly 8: %v", len(generic), generic)
+	}
+	if doc.Vouched != sessionKeyVouched {
+		t.Errorf("vouched = %q, want %q", doc.Vouched, sessionKeyVouched)
 	}
 	if parts := strings.Split(doc.Session, "/"); len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		t.Errorf("session %q is not the canonical <repo>/<branch> key", doc.Session)

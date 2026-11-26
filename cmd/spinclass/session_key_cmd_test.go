@@ -108,8 +108,9 @@ func TestSessionKeyPrintsExactlyTheKeyLineAsTheHolderListsItAndItsFingerprint(t 
 	if got, want := e.out.String(), khPub+"\nSHA256:FAKEFP\n"; got != want {
 		t.Errorf("output %q, want exactly %q (the comment is the holder's own, never rewritten)", got, want)
 	}
-	if e.errOut.Len() != 0 {
-		t.Errorf("with no certificate stderr says %q", e.errOut.String())
+	// With no certificate the only thing on stderr is the stated limit (A-H1).
+	if got, want := e.errOut.String(), "session-key: "+sessionKeyVouched+"\n"; got != want {
+		t.Errorf("with no certificate stderr says %q, want exactly the vouched line %q", got, want)
 	}
 }
 

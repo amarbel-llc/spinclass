@@ -19,6 +19,10 @@ func TestKeyholderPairStartStatusStopWalksTheWholeLifecycleAndLeavesNothing(t *t
 	prev := keyholderPairOut
 	t.Cleanup(func() { keyholderPairOut = prev })
 	keyholderPairOut = func() io.Writer { return &out }
+	// The test runs without a terminal, as the live recipes do: they say so.
+	prevRecipe := keyholderPairRecipe
+	t.Cleanup(func() { keyholderPairRecipe = prevRecipe })
+	keyholderPairRecipe = func() bool { return true }
 	run := func(action string) string {
 		t.Helper()
 		out.Reset()
