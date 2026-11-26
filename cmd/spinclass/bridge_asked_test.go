@@ -34,7 +34,9 @@ func TestABridgeAskedForAndOffIsSaidWithClownsReason(t *testing.T) {
 	stateHome := t.TempDir()
 	stubBridgeAsked(t, "required", "off: the serve created no bridge socket in 10s (is [confinement] bridge on for this host?)")
 	got := bridgeAskedNote(askedSession(t, "p"), stateHome)
-	want := "bridge: asked for (required), not running: the serve created no bridge socket in 10s (is [confinement] bridge on for this host?)"
+	// A required session cannot relaunch with its bridge down: the note names
+	// the recovery commands that exist (B-M3).
+	want := "bridge: asked for (required), not running: the serve created no bridge socket in 10s (is [confinement] bridge on for this host?); to recover, `sc close <session>`, set [confinement] bridge = \"offered\" in a sweatfile above the repo, then start it again"
 	if got != want {
 		t.Errorf("note = %q, want %q", got, want)
 	}

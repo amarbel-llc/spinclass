@@ -629,22 +629,79 @@ descriptor).
 
 # KNOWN LIMITS AND UNVERIFIED
 
+Every limit below is a tracked issue; the number is the place its removal
+condition lives.
+
 - Whether a relaunch of the session (an in-place restart) gives a new unit name,
   a new cgroup and a new frontend process: code-read by clown's owner (one unit
   name and one serve per clown process, so a restart is expected to be a new unit
   and a new serve). NOT observed. The first live run logs the serve's pid and
-  *CLOWN\_BRIDGE\_UNIT* before and after one in-place restart.
-- How long serve's stdio from clown lives: not checked.
+  *CLOWN\_BRIDGE\_UNIT* before and after one in-place restart. How long serve's
+  stdio from clown lives: not checked. (#526)
+- Between spinclass's read of the cgroup file and the admission check's own read
+  of it there is a window only a process of the same account that sees the launch
+  directory can use; the agent in the unit cannot. (#527)
 - The shim's behaviour in this page (the retry loop, the ready lines, the 503
   body, *ShimExitRefused*) is clown's statement of its own code, checked by
   clown's owner against that code; spinclass's proof exercises the retry, the
-  ready line and *ERR version*, not the unusable text of the shim.
+  ready line and *ERR version*, not the unusable text of the shim, which only
+  clown's unit test against a fake serve covers. (#529)
 - A launch that never said hello has no principal, so the state-file note by
-  principal is missing for it (the result-based note still shows).
+  principal is missing for it (the result-based note still shows). (#528)
 - Same-account processes outside every unit can write the files the frontend
   trusts (the cgroup file, the unit record, the principal mapping, the state
   file); the checks stop other users and other units, not a process of the same
   account outside them.
+- The remaining low findings of the cut's review rounds are collected in #533.
+
+## What this half serves, in plain words
+
+The ruling names three kinds of stream: *control*, *session*, and stdio carriage
+for host MCP servers. This listener serves two of them, *control* and *session*.
+Stdio carriage is not in this half; a label for it, like every other label, is
+answered *ERR unknown-service*. Nothing in an ordinary launch yet writes the
+in-unit MCP client entry that opens the *session* stream (clown's
+*bridge-stdio --service session* is the client; the first live run uses a
+hand-made entry). (#530)
+
+## The older serve route and a stop
+
+*stop-this-session* is not one of the five session tools, so over the bridge it is
+refused as an unknown tool. On the older serve route (clown's loopback relay,
+calls with no origin) it exists; a confined caller there may not displace another
+party's queued request, but nothing yet refuses *when=now* for it (the
+always-ask the tool description names is the in-unit hook, which that route
+skips). It stops only the caller's own session. (#532)
+
+## Deploy note: the floor tightens existing confined sessions
+
+The refusals of *force*, *fresh\_env* and *posture* for a confined
+*restart-this-session*, and of a confined session's cancel of a request another
+party queued, apply to EVERY confined session on deploy, not only to sessions
+launched with the bridge: they are keyed to the caller classifying as confined,
+on both doors, outside the one switch. They only narrow what a confined session
+could do before. A caller that classifies as confined only because the
+classifier could not read its evidence (no serve record, two live serves of one
+principal, an unresolvable state directory) is refused too, as the other gated
+tools are, and is told the classifier's reason.
+
+## The switch reaches only new spawns
+
+*bridge* is written into a session's launch spec at spawn. Changing the knob
+changes nothing for a session already launched: turning it on gives a running
+session no bridge, and a session launched with *required* whose bridge cannot
+come up keeps that setting through every restart, so clown refuses its launch.
+There is no verb that flips it in place (a deploy-free flip is #531, with #519).
+Recovery of such a session, with commands that exist today, run by the operator
+at a terminal outside the unit:
+
+- *sc list* shows the note "bridge: asked for (required), not running: <reason>".
+- *sc close <session>* (a spawned child: *close-child-session*), which discards
+  nothing unless *--force* is given; commit or land the work first.
+- Set *[confinement] bridge = "offered"* (or *"off"*) in a sweatfile above the
+  repo, then *sc start* or *spawn-session* again.
+
+Use *"offered"* only in the first live runs.
 
 The three written disagreements recorded with clown:
 

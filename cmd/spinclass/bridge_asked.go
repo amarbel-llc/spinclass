@@ -42,6 +42,11 @@ var bridgeAskedRead = func(st *session.State) (asked, result string) {
 	return spec.Bridge, rec.Bridge
 }
 
+// bridgeRequiredRecovery is the recovery of a session launched with bridge =
+// required whose bridge is down (spinclass-bridge(7), "The switch reaches only
+// new spawns").
+const bridgeRequiredRecovery = "; to recover, `sc close <session>`, set [confinement] bridge = \"offered\" in a sweatfile above the repo, then start it again"
+
 // bridgeAskedNote says what neither the state file nor clown's own screen says
 // to the operator: a live session that was launched to have a bridge (the spec
 // asked for it, `offered` or `required`) and has none. It speaks of a result
@@ -65,7 +70,14 @@ func bridgeAskedNote(st *session.State, stateHome string) string {
 		if reason == "" {
 			reason = "clown gave no reason"
 		}
-		return "bridge: asked for (" + asked + "), not running: " + crossinglog.SafeReason(reason)
+		note := "bridge: asked for (" + asked + "), not running: " + crossinglog.SafeReason(reason)
+		if asked == "required" {
+			// The setting is in the stored launch spec and reaches only new
+			// spawns, so a relaunch refuses again until the session is closed
+			// and started under a changed knob (#531).
+			note += bridgeRequiredRecovery
+		}
+		return note
 	case result == "recorded" && stateHome != "" && st.Principal != "":
 		if _, ok := crossinglog.ReadState(crossinglog.StateDir(stateHome), st.Principal); !ok {
 			return "bridge: asked for (" + asked + "), not running: the serve has reported no bridge state"
