@@ -55,7 +55,20 @@ const MaxReadSize = 1 << 20
 // more than max bytes (a larger file is an error, not a truncated read). A plain
 // os.ReadFile does none of this: a FIFO at the path hangs it, and /dev/zero
 // exhausts memory.
+//
+// It also refuses a parent directory that is a symlink or not a real directory
+// (B-L1): O_NOFOLLOW guards only the last element, so a worker that replaced
+// .spinclass with a link to a directory of its own making would otherwise have
+// its planted file read as the frontend's.
 func ReadRegular(path string, max int64) ([]byte, error) {
+	dir := filepath.Dir(path)
+	di, err := os.Lstat(dir)
+	if err != nil {
+		return nil, err
+	}
+	if !di.IsDir() {
+		return nil, fmt.Errorf("%s is not a real directory (mode %s): refusing to read %s through it", dir, di.Mode().Type(), filepath.Base(path))
+	}
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
