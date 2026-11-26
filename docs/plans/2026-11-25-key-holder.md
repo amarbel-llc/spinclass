@@ -579,6 +579,34 @@ configuration does not generate, and one command.
   output is unchanged. A journal that cannot be written warns and the change stands
   (flipping to `off` is the safe direction). The command takes the one word as its
   only argument; there is no `--force`.
+- **What `off` means, in plain words.** Spinclass leaves a NEW worker's
+  `SSH_AUTH_SOCK` alone, so the worker runs on the launching process's agent: the
+  operator's forwarded agent, as before the key holder existed. A resume of an existing
+  session is a new launch. `off` refuses nothing for a driver (a driver is never
+  refused by the file); a layer's invalid mode still refuses before the file is read.
+- **Review fixes (switch review, M-1, L-1, L-5, L-6, L-7, L-8).**
+  - M-1: the target/driver program disagreement is recorded while the switch is off and
+    returned wherever it turns on (the file's `on`, the passwd home's layers), not only
+    when a layer already said on (`keyholderSwitch.ToolConflict`).
+  - L-1: `sc keyholder-switch on` writes nothing when it would refuse every worker
+    launch (no trusted layer supplies `fibby` and `piggy`, a layer cannot be read, or a
+    program conflict); it names the keys and where the host's configuration writes them.
+  - L-6 (the point-4 ruling): for `off`, a failing account lookup is accepted: it already
+    refuses any launch where a loaded layer says on, so a holder against the operator's
+    off cannot start. For `on`, the command leaves an evidence marker `.switch-on` in every
+    state root the evidence gate reads (the one the operator's environment names and the
+    account's own), written before the file; `off` and `default` remove it. Find, the
+    sweeps, `sc keyholder-stop` and `sc close` never touch it (they act on hash-named
+    entries only; pinned by `TestTheSweepsAndStopsAndCloseLeaveTheSwitchMarkerAlone`).
+  - L-5: a path component that is a file (`ENOTDIR`) is an absent switch file. L-7: the
+    reader checks owner and mode as the writer does. L-8: the temporary file has a random
+    name, the directory is synced after the rename, and a group-writable directory names
+    `chmod go-w`.
+  - Left open (tracked in #523): L-2 (the refusal text under `off` for a confined holder
+    session), L-3 (a resume of an unconfined holder session under `off` moves it to the
+    operator's agent with no notice), L-4 (`describeKeyholderSwitch` swaps a global writer),
+    L-9 (`sc validate` repeats the precedence), L-10 (tests that cannot go red or read the
+    real home), I-1 to I-4.
 
 ## Later
 

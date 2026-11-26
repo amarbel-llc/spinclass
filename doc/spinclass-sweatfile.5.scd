@@ -1478,7 +1478,8 @@ on, and *fibby* and *piggy* still come from the trusted layers: with none
 supplying them every launch is refused and says so. *default*, or no file at
 all, leaves the layers to decide, exactly as before the file existed. A file
 that exists and is not one of the three words, is not a regular file (a link is
-never followed), is long, or cannot be read refuses every launch, naming the
+never followed), is long, or cannot be read refuses every worker launch (the
+operator's own driver launch is not refused), naming the
 path and the way out (*sc keyholder-switch default*, or remove the file). The
 command writes atomically (a temporary file, mode 0600, renamed into a
 directory it checks), is journalled to
@@ -1489,6 +1490,27 @@ effective mode and where it came from (the switch file, a layer, or none) and
 needs no terminal; *sc validate* and *sc host-load* show the same. A process of the same account can
 write this file as well as the operator (spinclass#515): it is the operator's
 setting, not a wall against the account's own sessions.
+
+What *off* means, in plain words: spinclass leaves a NEW worker's
+*SSH_AUTH_SOCK* alone, so the worker runs on whatever agent the launching
+process carries, which is the operator's forwarded agent, exactly as before the
+key holder existed. Only a launch that spinclass starts as a worker is touched
+at all; a resume of an existing session is a new launch. *sc keyholder-switch
+on* is not written when it would refuse every worker launch (no trusted layer
+supplies *fibby* and *piggy*, a layer cannot be read, or the target and the
+driver name different programs); the command says what is missing and changes
+nothing. The file must belong to the account and must not be writable by group
+or other, as the directory must not be. When the account database cannot
+answer, the launch is refused if a layer that did load says on, or the key
+holder has left state on this host; otherwise it warns once and proceeds as
+before. *sc keyholder-switch on* leaves an evidence marker (*.switch-on*) in the
+key holder's state directory, under both the account's root and the one the
+operator's environment names, so a failing account lookup after the operator
+switched on refuses launches instead of warning and proceeding on his agent;
+*off* and *default* remove it, and neither *sc close*, *sc clean* nor *sc
+keyholder-stop* does. An *off* file is honoured in the same situation because a
+failing lookup already refuses any launch where a loaded layer says on, so a
+holder against the operator's off cannot be started.
 
 *mode*
 	*"off"* or *"on"*; unset means *"off"*. With *"on"* every WORKER session
