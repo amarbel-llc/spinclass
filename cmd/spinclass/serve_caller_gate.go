@@ -68,6 +68,20 @@ func ungatedCLI[P any](run func(P) (string, error)) func(context.Context, json.R
 	}
 }
 
+// confinedCall says the caller of this call classifies as confined, on any
+// transport: a call that arrived on the bridge, or a call with no origin
+// (stdio, or clown's loopback relay to the older serve socket) from a serve
+// whose principal a unit record names. It fails closed like serveCallerConfined.
+//
+// The always-ask floor lives only in the hook that runs inside the unit, so a
+// verb whose escalation arguments (force, fresh_env, posture) must never rest on
+// it asks this instead of bridgedCall: the older serve route is a second way a
+// process inside the unit reaches the same handler and skips that hook.
+func confinedCall(ctx context.Context) bool {
+	confined, _ := confinement.ClassifyOrigin(ctx, serveCallerConfined)
+	return confined
+}
+
 // refuseConfinedServeCaller returns the refusal for tool when this serve's
 // caller classifies as confined, or nil to proceed. Call it before reading any
 // parameter. The refusal says what the caller holds (no right to the tool) and

@@ -410,6 +410,9 @@ func runRestartThisSessionFor(ctx context.Context, p restartThisSessionParams) (
 //
 // Over the bridge, the refusal for want of the trusted hand-off is in the
 // contract's text (bridgeRestartSelfRefusal); every other outcome is unchanged.
+// force, fresh_env and posture are refused outright for a confined caller on
+// ANY transport (J-M1): the always-ask floor lives in the hook inside the unit,
+// which a process in the unit skips by speaking MCP to the older serve socket.
 func handleRestartThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var p restartThisSessionParams
 	if len(args) > 0 {
@@ -417,7 +420,7 @@ func handleRestartThisSession(ctx context.Context, args json.RawMessage, _ comma
 			return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	if bridgedCall(ctx) && (p.Force || p.FreshEnv || p.Posture != "") {
+	if (p.Force || p.FreshEnv || p.Posture != "") && confinedCall(ctx) {
 		return command.TextErrorResult(bridgeRestartEscalationRefusal), nil
 	}
 	text, err := runRestartThisSessionFor(ctx, p)
@@ -1312,11 +1315,19 @@ func runCancelRestartFor(ctx context.Context, p cancelRestartParams) (string, er
 	if cancelRestartBeforeUpdate != nil {
 		cancelRestartBeforeUpdate()
 	}
-	var cleared *session.RestartRequest
+	// A confined session may cancel only a restart it queued itself (S-M1): a
+	// request the operator or a holder queued is an act of another principal,
+	// and the session holds no right on its own lifecycle to undo it.
+	confinedOwn := p.Child == "" && confinedCall(ctx)
+	var cleared, refused *session.RestartRequest
 	var approvedAt *time.Time
 	if err := updateLoadedSession(st, func(cur *session.State) bool {
 		now := time.Now().UTC()
 		switch {
+		case cur.RestartRequest != nil && confinedOwn && cur.RestartRequest.Requester != sessionsOwnID:
+			req := *cur.RestartRequest
+			refused = &req
+			return false
 		case cur.RestartRequest != nil:
 			req := *cur.RestartRequest
 			cleared = &req
@@ -1333,6 +1344,8 @@ func runCancelRestartFor(ctx context.Context, p cancelRestartParams) (string, er
 		return "", fmt.Errorf("clearing the restart request: %w", err)
 	}
 	switch {
+	case refused != nil:
+		return "", &policyRefusalError{msg: cancelOthersRestartRefusal(*refused), bridge: cancelOthersRestartRefusal(*refused)}
 	case cleared != nil:
 		notifyRestartCancelled(st, *cleared, caller, sessionsOwnID)
 		return fmt.Sprintf(
@@ -1398,9 +1411,24 @@ func handleCancelRestart(ctx context.Context, args json.RawMessage, _ command.Pr
 	}
 	text, err := runCancelRestartFor(ctx, p)
 	if err != nil {
-		return command.TextErrorResult(err.Error()), nil
+		return bridgeRefusalResult(ctx, err), nil
 	}
 	return command.TextResult(text), nil
+}
+
+// cancelOthersRestartRefusal is the refusal for a confined session cancelling a
+// restart another party queued: it says who asked (by kind, never a principal
+// id), why the session may not undo it, and who can.
+func cancelOthersRestartRefusal(req session.RestartRequest) string {
+	who := "another principal that holds this session"
+	switch req.Requester {
+	case session.OperatorRestartRequester:
+		who = "the operator"
+	case "":
+		who = "a requester the record does not name"
+	}
+	return fmt.Sprintf("%scancel-restart cannot cancel this restart: it was queued by %s, not by this session, and a session inside its unit may cancel only a restart it queued itself; the one who queued it, or the operator, runs `sc cancel-restart --child <session>` at a terminal outside the unit",
+		bridgeRefusalPrefix, who)
 }
 
 // printRestartVerdict writes v as exactly one JSON line.

@@ -1,0 +1,194 @@
+package main
+
+// The floor on the outside, on BOTH doors into a unit (J-M1) and a session's
+// own cancel of a restart another party queued (S-M1).
+//
+// The always-ask floor lives only in the hook that runs inside the unit, so a
+// process in the unit that speaks MCP to the older serve socket (clown's relay
+// port) skips it. The verbs therefore refuse the escalation arguments for any
+// caller that classifies as confined, whatever the transport; the bridge is one
+// way a call arrives, the older serve route is the other.
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
+)
+
+// withServeClassifier makes this serve classify its caller as confined or not
+// for the test, restoring the stub TestMain installs.
+func withServeClassifier(t *testing.T, confined bool) {
+	t.Helper()
+	original := serveCallerConfined
+	t.Cleanup(func() { serveCallerConfined = original })
+	serveCallerConfined = func() (bool, string) {
+		if confined {
+			return true, "unit record names the principal"
+		}
+		return false, "unconfined"
+	}
+}
+
+// A call with NO origin (the older serve route: stdio or clown's loopback
+// relay) from a caller the serve classifies as confined gets the same refusal
+// the bridge gives, before anything is queued.
+func TestOlderServeRouteRefusesEveryEscalationForAConfinedCaller(t *testing.T) {
+	for _, args := range []string{
+		`{"force":true}`,
+		`{"fresh_env":true}`,
+		`{"posture":"attended"}`,
+		`{"posture":"unattended"}`,
+		`{"posture":"keep"}`,
+		`{"force":true,"reason":"ATTACKER-bytes"}`,
+	} {
+		t.Run(args, func(t *testing.T) {
+			f := newLiarFixture(t)
+			withServeClassifier(t, true)
+			beforeB := f.b.fingerprint(t)
+			text, isErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(args))
+			if !isErr || text != refusalRestartEscalation {
+				t.Errorf("got isErr=%v %q\nwant   %q", isErr, text, refusalRestartEscalation)
+			}
+			if len(*f.handoff) != 0 {
+				t.Errorf("the hand-off ran: %+v", *f.handoff)
+			}
+			if got := f.b.fingerprint(t); got != beforeB {
+				t.Errorf("the session's record changed:\nbefore %s\nafter  %s", beforeB, got)
+			}
+			if rr := f.b.record(t).RestartRequest; rr != nil {
+				t.Errorf("a restart was queued: %+v", rr)
+			}
+		})
+	}
+}
+
+// A plain restart over the older route still works for a confined caller (the
+// floor is for escalation only), and an UNCONFINED caller is untouched: force
+// goes on to the verb and the always-ask hook, as before.
+func TestOlderServeRouteStillQueuesAPlainRestartAndLeavesUnconfinedForceAlone(t *testing.T) {
+	t.Run("confined plain restart", func(t *testing.T) {
+		f := newLiarFixture(t)
+		withServeClassifier(t, true)
+		text, isErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(`{"reason":"rebuild"}`))
+		if isErr || !strings.Contains(text, "restart queued for "+f.b.key) {
+			t.Fatalf("got isErr=%v %q", isErr, text)
+		}
+		if len(*f.handoff) != 1 {
+			t.Errorf("hand-off calls = %+v, want one", *f.handoff)
+		}
+	})
+	t.Run("unconfined force", func(t *testing.T) {
+		f := newLiarFixture(t)
+		withServeClassifier(t, false)
+		text, isErr := runHandler(handleRestartThisSession)(context.Background(), json.RawMessage(`{"force":true,"reason":"wedged"}`))
+		if text == refusalRestartEscalation {
+			t.Fatalf("an unconfined caller was refused the escalation: %q", text)
+		}
+		if isErr {
+			t.Fatalf("unconfined force failed: %q", text)
+		}
+		if rr := f.b.record(t).RestartRequest; rr == nil || rr.When != "now" {
+			t.Errorf("restart request = %+v, want a forced one (when=now)", rr)
+		}
+	})
+}
+
+// queueRestartFor writes a queued restart request, by requester, on s's record.
+func queueRestartFor(t *testing.T, s stagedSession, requester string) {
+	t.Helper()
+	st := s.record(t)
+	st.RestartRequest = &session.RestartRequest{
+		RequestedAt: time.Now().UTC(), Requester: requester, Reason: "no longer trusted", When: "idle",
+	}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A confined session may cancel only a restart it queued itself. A request the
+// operator or a holder queued is not its to erase: the cancel is refused, names
+// who asked, leaves the request in place and tells nobody anything false.
+func TestAConfinedSessionCannotCancelARestartAnotherPartyQueued(t *testing.T) {
+	for name, requester := range map[string]string{
+		"operator":   session.OperatorRestartRequester,
+		"holder":     "spawner",
+		"unnamed":    "",
+		"another id": "0b2f6c1e-1111-2222-3333-444455556666",
+	} {
+		t.Run("bridge/"+name, func(t *testing.T) {
+			notified := stubNotifyPrincipal(t)
+			f := newLiarFixture(t)
+			queueRestartFor(t, f.a, requester)
+			text, isErr := runHandler(handleCancelRestart)(bridgedCtxFor(f.a.key), json.RawMessage(`{}`))
+			if !isErr || !strings.HasPrefix(text, "refused: ") || !strings.Contains(text, "outside the unit") {
+				t.Fatalf("got isErr=%v %q, want a contract refusal naming who can cancel", isErr, text)
+			}
+			if rr := f.a.record(t).RestartRequest; rr == nil || rr.Requester != requester {
+				t.Errorf("the other party's request was touched: %+v", rr)
+			}
+			if len(*notified) != 0 {
+				t.Errorf("notifications on a refused cancel: %+v", *notified)
+			}
+		})
+		t.Run("older route/"+name, func(t *testing.T) {
+			stubNotifyPrincipal(t)
+			f := newLiarFixture(t)
+			withServeClassifier(t, true)
+			queueRestartFor(t, f.b, requester)
+			text, isErr := runHandler(handleCancelRestart)(context.Background(), json.RawMessage(`{}`))
+			if !isErr || !strings.HasPrefix(text, "refused: ") {
+				t.Fatalf("got isErr=%v %q, want a refusal", isErr, text)
+			}
+			if rr := f.b.record(t).RestartRequest; rr == nil || rr.Requester != requester {
+				t.Errorf("the other party's request was touched: %+v", rr)
+			}
+		})
+	}
+}
+
+// Its own request it may still cancel, on either door; and an unconfined caller
+// (the operator's terminal, or a serve that is not in a unit) cancels whatever is
+// queued, as before.
+func TestAConfinedSessionStillCancelsItsOwnRestartAndAnUnconfinedCallerAnyOne(t *testing.T) {
+	t.Run("bridge, own request", func(t *testing.T) {
+		stubNotifyPrincipal(t)
+		f := newLiarFixture(t)
+		queueRestartFor(t, f.a, f.a.principal)
+		text, isErr := runHandler(handleCancelRestart)(bridgedCtxFor(f.a.key), json.RawMessage(`{}`))
+		if isErr || !strings.Contains(text, f.a.key) {
+			t.Fatalf("got isErr=%v %q, want a success naming the session", isErr, text)
+		}
+		if rr := f.a.record(t).RestartRequest; rr != nil {
+			t.Errorf("the session's own request must be cleared: %+v", rr)
+		}
+	})
+	t.Run("older route, own request", func(t *testing.T) {
+		stubNotifyPrincipal(t)
+		f := newLiarFixture(t)
+		withServeClassifier(t, true)
+		queueRestartFor(t, f.b, f.b.principal)
+		text, isErr := runHandler(handleCancelRestart)(context.Background(), json.RawMessage(`{}`))
+		if isErr {
+			t.Fatalf("refused: %q", text)
+		}
+		if rr := f.b.record(t).RestartRequest; rr != nil {
+			t.Errorf("the session's own request must be cleared: %+v", rr)
+		}
+	})
+	t.Run("unconfined caller, the operator's request", func(t *testing.T) {
+		stubNotifyPrincipal(t)
+		f := newLiarFixture(t)
+		withServeClassifier(t, false)
+		queueRestartFor(t, f.b, session.OperatorRestartRequester)
+		if text, isErr := runHandler(handleCancelRestart)(context.Background(), json.RawMessage(`{}`)); isErr {
+			t.Fatalf("an unconfined caller was refused: %q", text)
+		}
+		if rr := f.b.record(t).RestartRequest; rr != nil {
+			t.Errorf("an unconfined caller's cancel must clear the request: %+v", rr)
+		}
+	})
+}
