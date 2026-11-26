@@ -57,3 +57,18 @@ function serve_rejects_unknown_prompt { # @test
   assert_success
   assert_output --partial '"error"'
 }
+
+# `sc host-load` names a live serve whose binary lacks the key holder's build
+# marker as "KEY HOLDER STALE SERVE". That scan is only as good as the marker being
+# in the SHIPPED binary: this greps the real built spinclass for it (a Go test
+# binary holds the text for any reference a test makes, so it cannot show this).
+# The string is kept here by hand: if keyholder.BuildMarker changes, this goes red
+# until it is changed here too, which is the check that the two agree.
+function keyholder_build_marker_is_in_the_shipped_binary { # @test
+  local bin
+  bin="$(command -v "${SPINCLASS_BIN:-spinclass}")"
+  [ -n "$bin" ] && [ -f "$(readlink -f "$bin")" ]
+  run grep -c -a -F 'spinclass-keyholder-build-v1' "$(readlink -f "$bin")"
+  assert_success
+  [ "$output" -ge 1 ]
+}
