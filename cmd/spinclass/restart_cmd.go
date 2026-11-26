@@ -15,6 +15,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/hungstatus"
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
@@ -89,11 +90,15 @@ func runRestartHandoff(dir string, argv []string) (string, error) {
 }
 
 // runHandoffWithEnv is runRestartHandoff with an explicit environment: nil
-// inherits the caller's, as the restart hand-off always has; non-nil is the
-// whole environment of the command.
+// inherits the caller's, as the restart hand-off always has, less a calling key
+// holder worker's commit-signing settings; non-nil is the whole environment of
+// the command.
 func runHandoffWithEnv(dir string, argv, env []string) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("the restart hand-off is empty")
+	}
+	if env == nil {
+		env = keyholder.StripGitSigning(os.Environ())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), restartHandoffTimeout)
 	defer cancel()

@@ -606,7 +606,9 @@ func workerEnvScoped(rp worktree.ResolvedPath, desc string, userEnv map[string]s
 	for k, v := range userEnv {
 		env = append(env, k+"="+v)
 	}
-	env = append(env, dotenv...)
+	// userEnv carries a holder worker's commit signing, which a later
+	// GIT_CONFIG pair would replace.
+	env = append(env, dotenvForHolderWorker(dotenv, userEnv)...)
 
 	env = append(env, identityVars(rp, desc)...)
 	env = append(env, session.TmpDirEnv(rp.AbsPath)...)

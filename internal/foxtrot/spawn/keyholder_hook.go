@@ -1,7 +1,12 @@
 package spawn
 
 import (
+	"fmt"
+	"io"
 	"maps"
+	"os"
+	"slices"
+	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 )
@@ -20,15 +25,41 @@ var KeyholderEnv func(home, repoPath, sessionKey string) (env map[string]string,
 // [keyholder] switch is off.
 var KeyholderPreflight func(home, repoPath, sessionKey string) error
 
-// withKeyholderEnv returns sessionEnv with kh laid over it and every other
+// holderNotice is where a key holder worker's ignored settings are said.
+var holderNotice io.Writer = os.Stderr
+
+// dotenvForHolderWorker drops the dotenv's GIT_CONFIG pairs when kh carries the
+// worker's commit signing: appended after it, they would turn signing off.
+func dotenvForHolderWorker(dotenv []string, kh map[string]string) []string {
+	pairs := map[string]string{}
+	for _, kv := range dotenv {
+		k, v, _ := strings.Cut(kv, "=")
+		pairs[k] = v
+	}
+	notice := keyholder.DropConfiguredGitConfig(pairs, kh)
+	if notice == "" {
+		return dotenv
+	}
+	fmt.Fprintln(holderNotice, notice)
+	return slices.DeleteFunc(slices.Clone(dotenv), func(kv string) bool {
+		k, _, _ := strings.Cut(kv, "=")
+		return keyholder.IsGitConfigPair(k)
+	})
+}
+
+// withKeyholderEnv returns sessionEnv with kh laid over it, every other
 // variable that names the operator's agent emptied, including one a configured
-// entry env set; sessionEnv itself is never modified.
+// entry env set, and a configured GIT_CONFIG pair dropped with a notice;
+// sessionEnv itself is never modified.
 func withKeyholderEnv(sessionEnv, kh map[string]string) map[string]string {
 	if len(kh) == 0 {
 		return sessionEnv
 	}
 	out := make(map[string]string, len(sessionEnv)+len(kh))
 	maps.Copy(out, sessionEnv)
+	if notice := keyholder.DropConfiguredGitConfig(out, kh); notice != "" {
+		fmt.Fprintln(holderNotice, notice)
+	}
 	for k := range out {
 		if keyholder.IsOperatorAgentVar(k) {
 			out[k] = ""

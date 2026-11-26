@@ -214,7 +214,9 @@ func TestAFailedSignatureNamesTheKeyHolderAndWhatToType(t *testing.T) {
 	}
 	for _, want := range []string{
 		"the key holder of session repo/w did not sign", r.pair.AgentSock,
-		"sc session-key repo/w", "sc resume repo/w", "git -c commit.gpgsign=false commit",
+		"sc session-key repo/w", "sc resume repo/w", "-c commit.gpgsign=false after git",
+		// A holder that shows and still does not sign has a next step too.
+		"it shows one and signing still fails",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the failure lacks %q:\n%s", want, out)

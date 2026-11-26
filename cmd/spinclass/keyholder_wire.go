@@ -6,9 +6,10 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -197,7 +198,12 @@ const maxAllowedSignersSize = 1 << 20
 // already configured with for repoPath, so the session still verifies those
 // signatures; nil when none is named or it cannot be read.
 func configuredAllowedSigners(repoPath string) []byte {
-	path, err := git.Run(repoPath, "config", "--type=path", "--get", "gpg.ssh.allowedSignersFile")
+	// Without a launching holder worker's own settings: its generated file is
+	// not the operator's.
+	cmd := exec.Command("git", "-C", repoPath, "config", "--type=path", "--get", "gpg.ssh.allowedSignersFile")
+	cmd.Env = keyholder.StripGitSigning(os.Environ())
+	out, err := cmd.Output()
+	path := strings.TrimSpace(string(out))
 	if err != nil || path == "" {
 		return nil
 	}
@@ -224,6 +230,9 @@ func withKeyholderEnv(env, kh map[string]string) map[string]string {
 	}
 	out := make(map[string]string, len(env)+len(kh))
 	maps.Copy(out, env)
+	if notice := keyholder.DropConfiguredGitConfig(out, kh); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
 	for k := range out {
 		if keyholder.IsOperatorAgentVar(k) {
 			out[k] = ""

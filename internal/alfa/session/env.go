@@ -1,6 +1,11 @@
 package session
 
-import "strings"
+import (
+	"slices"
+	"strings"
+
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
+)
 
 // inheritedSessionIDVars are session-identity environment variables that a
 // parent (driver) process must NOT leak into a child session it launches. A
@@ -55,10 +60,27 @@ var inheritedSessionIDVars = []string{
 
 // StripInheritedSessionIDs returns env with any inherited session-identity
 // variables removed, so a child session launched with the result re-derives
-// its own clown channel rather than inheriting the launcher's. Pass the
-// launcher's os.Environ(); the spinclass-owned SPINCLASS_* vars (appended or
-// os.Setenv'd separately by callers) are untouched. See spinclass#169.
+// its own clown channel rather than inheriting the launcher's, and without a
+// launching key holder worker's commit-signing settings, which name ITS key
+// (keyholder.StripGitSigning; a child with a holder of its own gets its own
+// settings laid on after). Pass the launcher's os.Environ(); the spinclass-owned
+// SPINCLASS_* identity vars (appended or os.Setenv'd separately by callers) are
+// untouched. See spinclass#169.
 func StripInheritedSessionIDs(env []string) []string {
+	return stripSessionIDVars(keyholder.StripGitSigning(env))
+}
+
+// StripInheritedSessionIDsFor is StripInheritedSessionIDs for a command run in
+// session sessionKey: when the launcher IS that session's key holder worker, its
+// signing settings are the session's own and stay.
+func StripInheritedSessionIDsFor(env []string, sessionKey string) []string {
+	if sessionKey != "" && slices.Contains(env, keyholder.GitSessionEnv+"="+sessionKey) {
+		return stripSessionIDVars(env)
+	}
+	return StripInheritedSessionIDs(env)
+}
+
+func stripSessionIDVars(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, e := range env {
 		drop := false

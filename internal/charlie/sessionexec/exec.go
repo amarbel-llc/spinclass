@@ -103,7 +103,7 @@ func IdentityEnv(st *session.State) []string { return identityEnv(st) }
 // SPINCLASS_* vars last so they win on collision (os/exec keeps the last
 // occurrence of a duplicated key).
 func identityEnv(st *session.State) []string {
-	env := session.StripInheritedSessionIDs(os.Environ())
+	env := session.StripInheritedSessionIDsFor(os.Environ(), st.Key())
 	env = append(env, session.IdentityEnv(st.Key(), st.WorktreePath, st.Description)...)
 	return append(env, session.TmpDirEnv(st.WorktreePath)...)
 }

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
@@ -63,6 +64,8 @@ func startHandoffEnvFor(child *session.State, base []string, stderr io.Writer) (
 			return nil, nil, err
 		}
 	}
+	// With nil the hand-off inherits this process's environment, which
+	// runHandoffWithEnv passes on without a caller's holder signing settings.
 	if !switchOn {
 		return nil, nil, nil
 	}
@@ -82,7 +85,9 @@ func startHandoffEnvFor(child *session.State, base []string, stderr io.Writer) (
 
 	env := make(map[string]string, len(base))
 	for _, kv := range base {
-		if k, v, ok := strings.Cut(kv, "="); ok {
+		// The caller's own git settings ride in kh, beside the child's signing,
+		// and the caller's holder signing is in neither.
+		if k, v, ok := strings.Cut(kv, "="); ok && !keyholder.IsGitConfigPair(k) {
 			env[k] = v
 		}
 	}

@@ -22,14 +22,17 @@ const (
 	// SSH_AUTH_SOCK its caller was given.
 	GitSessionEnv = "SPINCLASS_KEYHOLDER_SESSION"
 	GitAgentEnv   = "SPINCLASS_KEYHOLDER_AGENT"
-	// gitBaseEnv is how many GIT_CONFIG entries the environment had before the
-	// holder's own: a holder worker that launches another one replaces its
-	// entries instead of stacking them.
-	gitBaseEnv = "SPINCLASS_KEYHOLDER_GIT_BASE"
 
 	gitSignProgramName = "keyholder-git-sign"
 	allowedSignersName = "allowed_signers"
+	signingKeyName     = "signing_key.pub"
 )
+
+// SigningKeyPath is the file user.signingkey names: the pair's public key. A
+// worker keeps its environment across a restart, and a lost pair is replaced
+// with a NEW key in the same directory, so the setting names a file that the
+// replacement rewrites, never the key itself.
+func SigningKeyPath(pairDir string) string { return filepath.Join(pairDir, signingKeyName) }
 
 // GitSignProgram is the program a holder worker's git runs to sign. It sits
 // beside the key holder state root, not in a pair's directory: it must still be
@@ -55,19 +58,21 @@ if [ "${1:-}" = "-Y" ] && [ "${2:-}" = "sign" ]; then
 	s="${` + GitSessionEnv + `:-}"
 	printf '%s\n' \
 		"spinclass: the key holder of session $s did not sign (agent socket ${` + GitAgentEnv + `:-unset}; ssh-keygen's own words are above)." \
-		"  next: at a terminal run 'sc session-key $s'. If it shows no holder, run 'sc keyholder-stop $s', then 'sc resume $s'." \
-		"  to commit unsigned this once: git -c commit.gpgsign=false commit" >&2
+		"  next: at a terminal run 'sc session-key $s'. If it shows no holder, or it shows one and signing still fails," \
+		"  end this worker, run 'sc keyholder-stop $s', then 'sc resume $s' (a new key: certify it again)." \
+		"  to go on unsigned this once, put -c commit.gpgsign=false after git (commit, rebase, merge, cherry-pick)" >&2
 	exit 1
 fi
 exec "$keygen" "$@"
 `
 }
 
-// GitSigningEnv writes the signing program and the pair's allowed-signers file,
-// and returns the variables that make git in a worker sign with the pair's key.
-// environ is the launching process's environment: the GIT_CONFIG entries it
-// already carries are kept (all returned, so a hand-off to another process has
-// them too). otherSigners is the content of an allowed-signers file the
+// GitSigningEnv writes the signing program and the pair's public-key and
+// allowed-signers files, and returns the variables that make git in a worker
+// sign with the pair's key. environ is the launching process's environment: the
+// GIT_CONFIG entries it already carries are kept (all returned, so a hand-off
+// to another process has them too), except a launching holder worker's own
+// signing settings (StripGitSigning). otherSigners is the content of an allowed-signers file the
 // operator's git already names, kept so those signatures still verify inside
 // the worker.
 func GitSigningEnv(base, sessionKey, keygen string, pair Pair, environ []string, otherSigners []byte) (map[string]string, error) {
@@ -88,8 +93,13 @@ func GitSigningEnv(base, sessionKey, keygen string, pair Pair, environ []string,
 		return nil, fmt.Errorf("keyholder: writing the allowed signers: %w", err)
 	}
 
+	signingKey := SigningKeyPath(pair.Dir)
+	if err := writeFileAtomic(signingKey, []byte(key+"\n"), 0o600); err != nil {
+		return nil, fmt.Errorf("keyholder: writing the signing key's public half: %w", err)
+	}
+
 	have := map[string]string{}
-	for _, kv := range environ {
+	for _, kv := range StripGitSigning(environ) {
 		k, v, _ := strings.Cut(kv, "=")
 		have[k] = v
 	}
@@ -97,29 +107,20 @@ func GitSigningEnv(base, sessionKey, keygen string, pair Pair, environ []string,
 	if err != nil || count < 0 {
 		count = 0
 	}
-	if inherited, err := strconv.Atoi(have[gitBaseEnv]); err == nil && inherited >= 0 && inherited < count {
-		count = inherited
-	}
 
 	out := map[string]string{
 		GitSessionEnv: sessionKey,
 		GitAgentEnv:   pair.AgentSock,
-		gitBaseEnv:    strconv.Itoa(count),
 	}
 	for i := range count {
 		for _, name := range []string{"GIT_CONFIG_KEY_" + strconv.Itoa(i), "GIT_CONFIG_VALUE_" + strconv.Itoa(i)} {
 			out[name] = have[name]
 		}
 	}
-	for _, kv := range [][2]string{
-		{"gpg.format", "ssh"},
-		{"user.signingkey", "key::" + key},
-		{"commit.gpgsign", "true"},
-		{"gpg.ssh.program", program},
-		{"gpg.ssh.allowedSignersFile", allowed},
-	} {
-		out["GIT_CONFIG_KEY_"+strconv.Itoa(count)] = kv[0]
-		out["GIT_CONFIG_VALUE_"+strconv.Itoa(count)] = kv[1]
+	// The block StripGitSigning recognises: these keys, in this order.
+	for i, value := range [len(holderGitKeys)]string{"ssh", signingKey, "true", program, allowed} {
+		out["GIT_CONFIG_KEY_"+strconv.Itoa(count)] = holderGitKeys[i]
+		out["GIT_CONFIG_VALUE_"+strconv.Itoa(count)] = value
 		count++
 	}
 	out["GIT_CONFIG_COUNT"] = strconv.Itoa(count)

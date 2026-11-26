@@ -231,6 +231,10 @@ func selftest(ctx context.Context, p selftestParams, res *selftestResult, say fu
 // cannot sign for git, replace it.
 var selftestSignedCommit = signedCommitWithHolder
 
+// selftestGitSigningEnv is the worker's own writer; a test hands the commit
+// step one whose settings do not sign, to see the verification refuse it.
+var selftestGitSigningEnv = keyholder.GitSigningEnv
+
 // signedCommitWithHolder makes a plain `git commit` in a throwaway repository,
 // with the settings a holder worker's launch gives it (the same writer), and
 // verifies it. Nothing of the operator's git configuration is read.
@@ -250,7 +254,7 @@ func signedCommitWithHolder(ctx context.Context, l *keyholder.Launcher, pair key
 		"GIT_AUTHOR_NAME=spinclass", "GIT_AUTHOR_EMAIL=selftest@spinclass.invalid",
 		"GIT_COMMITTER_NAME=spinclass", "GIT_COMMITTER_EMAIL=selftest@spinclass.invalid",
 	}
-	signing, err := keyholder.GitSigningEnv(l.Base, pair.Session, keygen, pair, env, nil)
+	signing, err := selftestGitSigningEnv(l.Base, pair.Session, keygen, pair, env, nil)
 	if err != nil {
 		return err
 	}

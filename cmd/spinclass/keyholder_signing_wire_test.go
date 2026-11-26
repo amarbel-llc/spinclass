@@ -48,13 +48,15 @@ func TestAHolderLaunchEnvironmentMakesAPlainCommitSignWithTheHolder(t *testing.T
 		t.Fatal(err)
 	}
 	got := gitSettings(t, env)
-	for k, want := range map[string]string{
-		"gpg.format": "ssh", "commit.gpgsign": "true",
-		"user.signingkey": "key::ssh-ed25519 AAAAC3NzaFAKEAAA",
-	} {
+	for k, want := range map[string]string{"gpg.format": "ssh", "commit.gpgsign": "true"} {
 		if got[k] != want {
 			t.Errorf("%s = %q, want %q", k, got[k], want)
 		}
+	}
+	// A file, not the key itself: a re-mint rewrites it under a running worker.
+	signingKey, err := os.ReadFile(got["user.signingkey"])
+	if err != nil || string(signingKey) != "ssh-ed25519 AAAAC3NzaFAKEAAA\n" {
+		t.Errorf("user.signingkey = %q holds %q (%v)", got["user.signingkey"], signingKey, err)
 	}
 	script, err := os.ReadFile(got["gpg.ssh.program"])
 	if err != nil || !bytes.Contains(script, []byte("'/pin/ssh-keygen'")) {
