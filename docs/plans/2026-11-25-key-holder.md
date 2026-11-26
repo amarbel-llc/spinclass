@@ -265,7 +265,19 @@ cannot write.
   history (a session removed by something other than `sc close`) is swept the
   same way; the kind record of a LIVE session is kept (a driver has no pair, and
   its kind file is the one trace of it), and a kind record beside a key history
-  is a stopped session's, kept on purpose.
+  is a stopped session's, kept on purpose. A key history (and its kind record)
+  with nothing left of its pair, that NO session record maps to, is swept too
+  (`Found.HistoryOnly`): `sc clean` reaps a session's worktree without going
+  through the key holder, so an operator stop's kept history would otherwise stay
+  for ever, tell a later session with the same key that its first key REPLACED
+  one, and keep the state root non-empty (which is evidence for the "never
+  switched it on" rule). One whose session record exists is the live session's,
+  reported and never swept, and `sc keyholder-stop --all` does not list it as a
+  pair to stop. `sc clean` surveys before it reaps, so a history left by the
+  worktrees it reaps in one run is swept by the next. `ForgetSession` (close)
+  looks for a pair directory AGAIN under the lock: a start that held the lock
+  while it waited has made a pair since, and it is stopped the proper way, not
+  left running with its records deleted.
   **Evidence for the lock.** `TestAStopRacingAStartLeavesAWholePairOrNone` is NOT
   evidence that the lock works: it passes with the flock taken out (checked by
   mutation, with the fake runner slowed to widen the window), because with the
@@ -405,16 +417,38 @@ driver's own context, and the home and state directories the relaunch paths
 resolve. A host with no `[keyholder]` table must launch exactly as it did, so
 (`cmd/spinclass/keyholder_newsource.go`, one function for every site):
 
-- A failure of one of those NEW sources refuses the launch only when there is
-  evidence the switch is, or once was, on for this host: a layer that did load
-  says `on`, or the key holder has left state under its state root (a pair
-  directory, a key history, a kind record or a lock file; an unreadable state
-  root counts as evidence, since not knowing is not "no"). Otherwise it is
-  warned once per process on stderr and the launch proceeds with the switch off.
+- The account database's home not resolving (the one source left that is not a
+  layer) refuses the launch only when there is evidence the switch is, or once
+  was, on for this host: a layer that did load says `on`, or the key holder has
+  left state (any entry, whatever its name: a pair directory, a key history, a
+  kind record, a lock file or an unrelated file; an unreadable state root counts
+  as evidence, since not knowing is not "no") under EITHER state root: the one the
+  caller's environment names (`XDG_STATE_HOME`, else `$HOME`) AND the account
+  database's own (`<passwd home>/.local/state/spinclass/keyholder`), so a process
+  started with another `XDG_STATE_HOME` or an empty `HOME` cannot hide what the
+  host holds. A root that is not an absolute path says nothing (an empty `HOME`
+  makes the environment's root relative to the working directory). Otherwise it
+  is warned once per process (per distinct message; two soft failures in one
+  launch are one message of two lines) on stderr and the launch proceeds with the
+  switch off.
+- The sites that resolve `HOME` or the state directory themselves (the
+  relaunch boundary check and the start hand-off) cannot trust either variable:
+  when they fail they take "a layer says on" from the account database's own home
+  layers (`keyholderLoadedOnViaPasswd`), not from a hard-coded false.
+- A refusal by evidence says why and the way out: it names the state root it
+  looked at ("the key holder is or was on for this host (it has left state under
+  ...)") and what the operator runs to launch as before with no key holder in use
+  (`sc keyholder-stop --all`, `sc clean`, remove that directory), or, for a layer
+  that did load, to fix what failed.
 - Still refused with no evidence at all: the TARGET repo's own sweatfile
   hierarchy not loading (every launch read it before the key holder existed:
-  `attachSession` and the spawn path), and a `[keyholder]` table that does not
-  parse or validate (a layer that names the key holder is evidence in itself).
+  `attachSession` and the spawn path); a layer that EXISTS but cannot be loaded
+  (the driver's own context, the layers under the account's home): an unloadable
+  file may be the one that switches the key holder on, and only an ABSENT layer
+  is "never on" (note: this reads two places a launch did not read before, so a
+  broken sweatfile above the driver's repo now refuses a launch that used to
+  ignore it); and a `[keyholder]` table that does not parse or validate (a layer
+  that names the key holder is evidence in itself).
 
 ## Deploy order, and what breaks if it is violated (B-M5, B-M4)
 
@@ -457,13 +491,21 @@ done out of order; every one fails closed and none exposes the operator's agent.
    keeps the binary it started with, and an old serve spawns workers on the OLD
    path: no pair, the operator's agent, and it ignores `[keyholder]` silently (an
    unknown table fails only `sc validate`). The new binary cannot reach into it.
-   Detection: `sc host-load` (text and `--format json`) lists, while the switch is
-   on, every live serve whose binary lacks the key holder's build marker
-   (`keyholder.BuildMarker`) under "KEY HOLDER STALE SERVE" (field
-   `keyholder_stale_serve`), by the same scan as the host queue's QUEUE BYPASS
-   (`cmd/spinclass/hostload_keyholder_stale.go`); and `sc list` flags a worker that
-   has no pair ("holder: none, operator agent"). The listing is a check, the
-   restart is the step: with the switch off it says nothing.
+   Detection: `sc host-load` (text and `--format json`) lists every live serve
+   whose binary lacks the key holder's build marker (`keyholder.BuildMarker`) under
+   "KEY HOLDER STALE SERVE" (field `keyholder_stale_serve`), by the same scan as the
+   host queue's QUEUE BYPASS (`cmd/spinclass/hostload_keyholder_stale.go`). It is a
+   fact about binaries, so it is shown WHETHER THE SWITCH IS ON OR OFF, from any
+   working directory, with no sweatfile read: check it at this step, BEFORE step 6,
+   and restart until it is empty. (Right after the deploy every serve that started
+   before it is listed, on a host that has not switched anything on: that is the
+   list to restart.) A serve whose binary cannot be read is skipped silently, as
+   QUEUE BYPASS skips it. `sc list` flags a worker that has no pair ("holder: none,
+   operator agent") while the switch is on. That the marker really is in the
+   SHIPPED binary is checked by the bats lane
+   (`keyholder_build_marker_is_in_the_shipped_binary`, in
+   `zz-tests_bats/serve.bats`), not by a Go test (a Go test binary holds the text
+   for any reference a test makes).
 6. **The operator switches `mode` on** (his act). Before this, a launch with the
    mode on and the paths unset is refused naming the setting.
 

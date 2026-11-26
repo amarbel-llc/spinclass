@@ -1502,16 +1502,22 @@ that can write the operator's home.
 	session finds it at *$SPINCLASS_KEYHOLDER_CERT*. Any other value is an error:
 	every launch is refused until it is fixed (*sc validate* names it).
 
-	*A host that never switched it on.* Where no layer names *[keyholder]* and
-	the key holder has left nothing under its state directory, a launch behaves as
-	it did before the key holder existed. A failure to resolve the account's home,
-	to read the sweatfiles under it or the driver's own, or to find the home or
-	state directory a relaunch needs, is then a single warning line on standard
-	error and the launch goes ahead with the switch off. The same failure refuses
-	the launch as soon as a layer that did load says *on*, or any key holder state
-	exists (a pair, a key history, a kind record or a lock file). A *[keyholder]*
+	*A host that never switched it on.* Where no layer that loaded says *on* and
+	the key holder has left nothing under its state directories (a layer that says
+	*off* counts as nothing), a launch behaves as it did before the key holder
+	existed. A failure to resolve the account's
+	home, or to find the home or state directory a relaunch needs, is then a
+	warning on standard error (once per distinct message, per process) and the
+	launch goes ahead with the switch off. The same failure refuses the launch as
+	soon as a layer that did load says *on*, or the key holder has left ANY entry
+	under either of its two state directories: the one the environment names
+	(*$XDG_STATE_HOME*, else *$HOME*) and the account database's own. A refusal
+	of that kind names the directory it looked at and the way out: fix what failed,
+	or, with no key holder in use, run *sc keyholder-stop --all* and *sc clean* and
+	remove that directory. A sweatfile that exists but cannot be loaded (the
+	driver's own context, the layers under the account's home), a *[keyholder]*
 	table that does not validate, and the target repository's own sweatfiles not
-	loading, always refuse.
+	loading, always refuse: only an absent layer is "never on".
 
 	*Deploy order.* A host takes the key holder in this order, and each step fails
 	closed when skipped: (1) a spinclass that parses *[keyholder]* (without it,
@@ -1528,7 +1534,8 @@ that can write the operator's home.
 	respawned, so that no *spinclass serve* older than the key holder is left (a
 	running serve keeps the binary it started with and spawns workers on the
 	operator's agent, ignoring *[keyholder]*; *sc host-load* lists such serves under
-	KEY HOLDER STALE SERVE while the switch is on); (6) the operator sets
+	KEY HOLDER STALE SERVE whether the switch is on or off, from any directory, so
+	check it at this step and restart until it is empty); (6) the operator sets
 	*mode = "on"*. Clown's refusal text for step 2 was read in the parent of
 	f502df21 (its spec check already refused *SSH_AUTH_SOCK* as a scrubbed key); an
 	older clown was not run.
@@ -1619,7 +1626,14 @@ that can write the operator's home.
 	keeps the pair and so its lock. A lock file left with no pair (a stop that was
 	cut short, a build that kept it) is listed by the dry run of
 	*sc keyholder-stop --all* and removed by that command and by *sc clean*,
-	unless a process holds the lock: the sweep never waits for a held lock.
+	unless a process holds the lock: the sweep never waits for a held lock. So is a
+	key history (with the kind record beside it) that has nothing left of its pair
+	and that no session record maps to: *sc clean* reaps a session's worktree
+	without closing it through the key holder, so the history an operator stop kept
+	would otherwise stay for ever and tell a later session with the same key that its
+	first key replaced one. A history whose session record exists is kept on purpose
+	and is never swept. The next *sc clean* after the one that reaped the session
+	removes it.
 
 	*Units.* A session's pair is two transient user units,
 	*spinclass-keyholder-fibby-<hash>.service* (fibby, the virtual card) and
