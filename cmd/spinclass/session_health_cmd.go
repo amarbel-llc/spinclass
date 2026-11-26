@@ -92,7 +92,12 @@ func productionHealthDeps() healthDeps {
 		UnitClock: func(st *session.State) (confinement.UnitClock, bool) {
 			return confinement.UnitClockForWorktree(st.WorktreePath)
 		},
-		KeyholderNote: func(st *session.State) string { return keyholderNote(st.Key(), true) },
+		KeyholderNote: func(st *session.State) string {
+			if n := keyholderNote(st.Key(), true); n != "" {
+				return n
+			}
+			return keyholderNoPairNoteFn(st)
+		},
 		JobRunning: func(st *session.State) bool {
 			j, err := job.Read(st.WorktreePath)
 			return err == nil && j.Status == job.StatusRunning

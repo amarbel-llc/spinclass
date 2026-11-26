@@ -397,8 +397,16 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 			}
 		}
 		local := session.ListRowsWithClowns(states, closed, counts)
+		byKey := make(map[string]*session.State, len(states))
+		for i := range states {
+			byKey[states[i].SessionKey] = &states[i]
+		}
 		for i := range local {
-			local[i].KeyHolder = keyholderNoteFn(local[i].SessionKey)
+			if st := byKey[local[i].SessionKey]; st != nil {
+				local[i].KeyHolder = keyholderListNote(st)
+			} else {
+				local[i].KeyHolder = keyholderNoteFn(local[i].SessionKey)
+			}
 		}
 		data, err := json.Marshal(append(local, remoteRows...))
 		if err != nil {
@@ -427,7 +435,7 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 		}
 		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s%s%s\n",
 			s.SessionKey, resolved, marker, s.Branch, exited, s.WorktreePath, s.Description,
-			spawnedBySuffix(s.SpawnedBy), holdersSuffix(len(s.Holders), s.Orphan())+keyholderSuffix(keyholderNoteFn(s.SessionKey)))
+			spawnedBySuffix(s.SpawnedBy), holdersSuffix(len(s.Holders), s.Orphan())+keyholderSuffix(keyholderListNote(&s)))
 	}
 	for _, r := range remoteRows {
 		fmt.Fprintf(&b, "%s:%s\t%s\t\t%s\t\t\t%s%s%s\n",

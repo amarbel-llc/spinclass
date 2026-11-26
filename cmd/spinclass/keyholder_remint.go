@@ -10,6 +10,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/bravo/validate"
 )
 
 // A lost key holder pair costs the session its key: the keys live in fibby's
@@ -95,6 +96,79 @@ func keyholderBeforeRestart(st *session.State, stderr io.Writer) error {
 // cannot be had.
 func keyholderRestartRefusal(st *session.State, err error) string {
 	return fmt.Sprintf("the key holder pair of %s is gone and could not be started again (%v), so the session would come back on a holder socket nothing listens on; nothing was restarted. Fix the cause, or switch the key holder off with [keyholder] mode = \"off\" in a trusted sweatfile", st.Key(), err)
+}
+
+// keyholderNoPairText is what `sc list`, session-health and `sc validate` say
+// about a worker that has no holder while the switch is on (A-M2). Turning the
+// switch on starts nothing for sessions that already run, and a restart, a
+// watchdog relaunch or a re-arm brings such a session back on the environment it
+// had: the operator's agent. Only a resume of an unconfined session, or a close
+// and a new spawn, puts it on its own key.
+const keyholderNoPairText = "holder: none, operator agent (launched before the switch, or with no pair): a restart does not convert it; close and respawn"
+
+// keyholderNoPairNoteFn is the note for a session that has no pair state at all;
+// tests replace it. It reads the sweatfiles, so it answers the cheap questions
+// first.
+var keyholderNoPairNoteFn = keyholderNoPairNote
+
+// keyholderListNote is the whole key holder note of a session for the list
+// renderers: what its pair needs, else (A-M2) that it has no holder at all.
+func keyholderListNote(st *session.State) string {
+	if n := keyholderNoteFn(st.SessionKey); n != "" {
+		return n
+	}
+	return keyholderNoPairNoteFn(st)
+}
+
+// keyholderNoPairNote says "holder: none, operator agent" for a live worker with
+// no pair state while the switch is on, and "" otherwise: for a closed or
+// abandoned session, an implicit one, a session that has pair state (its own note
+// speaks), a DRIVER (rule A: the operator's own session keeps his agent, by
+// design: the recorded kind decides, and a session whose record names a spawner
+// is a worker whatever else says otherwise) and a switch that is off.
+func keyholderNoPairNote(st *session.State) string {
+	if st == nil || st.IsTombstone() || st.Kind == session.KindImplicit || st.ResolveState() == session.StateAbandoned {
+		return ""
+	}
+	base := keyholderStateBaseFn()
+	if keyholder.HasState(base, st.Key()) {
+		return ""
+	}
+	worker := resumeIsSpawned(st)
+	if k, ok := keyholder.ReadKind(base, st.Key()); ok && k == keyholder.KindWorker {
+		worker = true
+	}
+	if !worker {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	sw, err := resolveKeyholderSwitch(home, st.RepoPath)
+	if err != nil || !sw.On {
+		return ""
+	}
+	return keyholderNoPairText
+}
+
+func init() { validate.KeyholderSessionNotes = keyholderNoPairSessionNotes }
+
+// keyholderNoPairSessionNotes lists, for `sc validate`, the live workers that
+// have no holder while the switch is on: one "<session>: holder: none, ..." line
+// each.
+func keyholderNoPairSessionNotes() []string {
+	states, err := session.ListAll(nil)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for i := range states {
+		if n := keyholderNoPairNoteFn(&states[i]); n != "" {
+			out = append(out, states[i].Key()+": "+n)
+		}
+	}
+	return out
 }
 
 // keyholderNote is the line `sc list` and session-health show about a session's

@@ -971,6 +971,12 @@ func CheckKeyholder(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// KeyholderSessionNotes lists the live sessions that have no holder while the
+// switch is on (A-M2): one "<session>: holder: none, operator agent ..." entry
+// each. The command package sets it, because the answer needs session records;
+// the default is none, so a build or test that does not set it reports nothing.
+var KeyholderSessionNotes = func() []string { return nil }
+
 // CheckKeyholderEffective reports the key holder as a launch would see it: the
 // effective mode across every layer above the repo (the last one that sets it
 // wins), always as one line "key holder: on" or "key holder: off", and, when it
@@ -1784,6 +1790,13 @@ func Run(w io.Writer, home, repoDir string) int {
 			khSub.NotOk(iss.Field, map[string]string{"severity": iss.Severity, "message": iss.Message})
 		} else {
 			khSub.Ok(iss.Message)
+		}
+	}
+	// With the switch on, the workers that run without a holder are listed: turning
+	// the switch on starts nothing for a session that already runs.
+	if on, _, err := sweatfileio.TrustedKeyholderMode(result, home, mainRoot); err == nil && on {
+		for _, n := range KeyholderSessionNotes() {
+			khSub.Ok("key holder: " + n)
 		}
 	}
 	khSub.Plan()
