@@ -3396,22 +3396,6 @@ debug-review-package name base *context:
     done
     echo "package at $out: $(ls "$out/src" | wc -l) sources, $(ls "$out/tests" | wc -l) tests, $(ls "$out/docs" | wc -l) docs, $(ls "$out/context" | wc -l) context files, $(wc -l < "$out/full.diff") diff lines"
 
-# [debug] Documentation recipe for the vectors drift test against clown's recorded
-# digests: internal/0/bridge/vectors_drift_clown_test.go (build tag clownvectors)
-# compares sha256(testdata/vectors.json) and sha256(testdata/admission-vectors.json)
-# with bridgewire.VectorsSHA256 and peercheck.AdmissionVectorsSHA256 of the LOCKED
-# clown (clown rev ed73ff6 or later). Today's lock has no such constants, so the
-# tagged file does not compile and the untagged twin only SKIPs with the plain
-# message. godyn-test (`just debug-go-test`) takes no build tags, so this recipe
-# cannot run the tagged test; once the lock carries the constants, remove the
-# tag and the skip file (checklist issue "bridge: clown lock bump checklist"),
-# after which `just debug-go-test internal/0/bridge` runs it.
-#
-# print how the clown vectors drift test is switched on
-[group("debug")]
-debug-vectors-drift-clown:
-    @printf '%s\n' 'vectors drift test: off until the lock carries clown ed73ff6 or later (see the checklist issue); run today: just debug-go-test internal/0/bridge "" "-test.run VectorsDrift -test.v"'
-
 # [debug] The two real halves of the bridge against each other (FDR 0048, J-H1
 # start order): spinclass's real `spinclass serve` listener and clown's real shim
 # (`clown bridge-listen`, from a PRE-BUILT clown named by the clown_bin argument) in a real transient unit
@@ -3419,7 +3403,8 @@ debug-vectors-drift-clown:
 # starts the unit first, then serve; C sends a mismatched hello from inside the
 # admitted unit. bridge.cgroup and the unit record are written by clown's REAL
 # writers (bridgewire.WriteCgroupFile, agentscope.WriteResult) through clown's
-# hidden `clown bridge-seam-write` verb; the principal mapping line is written
+# separate `clown-bridge-seam` binary (the seam_bin argument: a PRE-BUILT store
+# path, never in production clown); the principal mapping line is written
 # by this recipe (spinclass has no CLI for its confined-launch writer, pinned to
 # the real writer by TestRecipeMappingLineIsWhatTheRealWriterWrites).
 # Scratch under a 0700 mktemp; nothing of the operator's is touched; one run at a
@@ -3427,7 +3412,7 @@ debug-vectors-drift-clown:
 #
 # run both real halves against each other in both start orders
 [group("debug")]
-debug-bridge-halves-proof clown_bin:
+debug-bridge-halves-proof clown_bin seam_bin:
     #!/usr/bin/env bash
     set -uo pipefail
     export LC_ALL=C
@@ -3445,7 +3430,10 @@ debug-bridge-halves-proof clown_bin:
     clown="{{ clown_bin }}"
     case "$clown" in /nix/store/*/bin/clown) ;; *) say "clown_bin must be an absolute /nix/store/.../bin/clown path, got '$clown'"; exit 1;; esac
     [ -x "$clown" ] || { say "no executable clown at $clown"; exit 1; }
-    say "spinclass=$sc"; say "clown=$clown"
+    seam="{{ seam_bin }}"
+    case "$seam" in /nix/store/*/bin/clown-bridge-seam) ;; *) say "seam_bin must be an absolute /nix/store/.../bin/clown-bridge-seam path, got '$seam'"; exit 1;; esac
+    [ -x "$seam" ] || { say "no executable clown-bridge-seam at $seam"; exit 1; }
+    say "spinclass=$sc"; say "clown=$clown"; say "seam=$seam"
     base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/bh.XXXXXX")"; chmod 0700 "$base"
     ua="clown-agent-bh$$a.service"; ub="clown-agent-bh$$b.service"; uc="clown-agent-bh$$c.service"
     serve_pids=()
@@ -3499,16 +3487,16 @@ debug-bridge-halves-proof clown_bin:
       local cg; cg="$(systemctl --user show -p ControlGroup --value "$2")"
       case "$cg" in */clown-agent.slice/"$2") ;; *) fail "unit cgroup $cg does not end in /clown-agent.slice/$2"; return 1;; esac
       # clown's REAL writer (bridgewire.WriteCgroupFile) through its hidden verb.
-      "$clown" bridge-seam-write cgroup-file --path "$base/cg$1" --cgroup "$cg" >"$base/wcg$1.out" 2>&1 \
-        || { fail "bridge-seam-write cgroup-file failed: $(head -c 200 "$base/wcg$1.out")"; return 1; }
+      "$seam" cgroup-file --path "$base/cg$1" --cgroup "$cg" >"$base/wcg$1.out" 2>&1 \
+        || { fail "clown-bridge-seam cgroup-file failed: $(head -c 200 "$base/wcg$1.out")"; return 1; }
       cgval="$cg"
     }
     write_record_and_mapping() { # unit
       mkdir -p "$(dirname "$map")"
       # The unit record is clown's REAL writer (agentscope.WriteResult over unitresult.WriteResult),
       # through its hidden verb, written after the shim is ready as in a launch.
-      "$clown" bridge-seam-write result --path "$rec" --unit "$1" --cgroup "$cgval" --principal "$principal" --bridge recorded >"$base/wres.out" 2>&1 \
-        || { fail "bridge-seam-write result failed: $(head -c 200 "$base/wres.out")"; return 1; }
+      "$seam" result --path "$rec" --unit "$1" --cgroup "$cgval" --principal "$principal" --bridge recorded >"$base/wres.out" 2>&1 \
+        || { fail "clown-bridge-seam result failed: $(head -c 200 "$base/wres.out")"; return 1; }
       # The principal mapping: spinclass has no CLI that runs its confined-launch writer
       # (RecordPrincipalFromUnit runs inside `sc spawn`), so the recipe writes this one line;
       # The line's template lives in ONE file the test also reads, and
