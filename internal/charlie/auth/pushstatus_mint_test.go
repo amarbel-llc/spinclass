@@ -28,6 +28,10 @@ func TestMintRecordsItsSourceAndAResumeSaysReused(t *testing.T) {
 	if !got.Token || !got.Reused || got.Source != SourceMint || got.MintedAt.IsZero() {
 		t.Errorf("RecordedStatus = %+v, want the reused token", got)
 	}
+	// The origin is ssh and the mint's rewrite makes git push to it over https.
+	if got.PushTo != (PushDest{HTTP: true}) {
+		t.Errorf("PushTo = %+v, want the push URL as git rewrites it", got.PushTo)
+	}
 	RemoveCredential(wtPath)
 	if got := RecordedStatus(repoPath, "feature-x", wtPath); got.Token || !strings.Contains(got.Reason, "credential file is gone") {
 		t.Errorf("with the file gone: %+v", got)
@@ -98,6 +102,22 @@ func TestARecordThatCannotBeReadIsNotSaidToHaveNoToken(t *testing.T) {
 	line := RecordedStatus(repoPath, "feature-x", wtPath).Line(true, id.SessionKey)
 	if !strings.HasPrefix(line, "push_token: unknown (spinclass could not read this session's record") {
 		t.Errorf("line = %q", line)
+	}
+}
+
+// A skip reason quotes the parse error, which quotes the origin: its userinfo
+// does not come with it.
+func TestASkipReasonNeverCarriesURLUserinfo(t *testing.T) {
+	repoPath, _, id := setupRepo(t)
+	if out, err := exec.Command("git", "-C", repoPath, "remote", "set-url", "origin", "https://bob:userinfo-marker@forge.example.com:notaport/o/r.git").CombinedOutput(); err != nil {
+		t.Fatalf("set-url: %v\n%s", err, out)
+	}
+	outcome, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, "")
+	if err != nil || outcome.Kind != NoForgeOrigin || !strings.Contains(outcome.Skipped, "<redacted>@forge.example.com") {
+		t.Fatalf("kind %q err %v; redacted: %v", outcome.Kind, err, strings.Contains(outcome.Skipped, "<redacted>@"))
+	}
+	if strings.Contains(outcome.Skipped, "userinfo-marker") {
+		t.Error("the skip reason carries the origin's userinfo")
 	}
 }
 

@@ -110,6 +110,9 @@ func TestASpawnWhoseMintFailsSaysWhyInItsResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(p.PushLine, "an http(s) push works only if git already has a credential for it") {
+		t.Errorf("PushLine = %q, want it to speak of the origin's https push URL", p.PushLine)
+	}
 	if !strings.Contains(p.PushLine, "the mint failed: the mint command exited with status 7") || strings.Contains(p.PushLine, "STDERR-MARKER") || strings.Contains(p.PushLine, "warning above") {
 		t.Errorf("PushLine = %q", p.PushLine)
 	}
