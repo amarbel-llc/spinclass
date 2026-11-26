@@ -208,6 +208,16 @@ func TestSessionKeyRefusalsNameCommandsTheOperatorCanRun(t *testing.T) {
 					t.Errorf("refusal %q does not name %s", err, w)
 				}
 			}
+			// A resume starts a pair only with the switch on, and the new key reaches
+			// only the process a launch starts: the running agent must be restarted.
+			for _, w := range []string{"[keyholder] mode on", "restart", "SSH_AUTH_SOCK"} {
+				if c.name != "no pair" && !strings.Contains(err.Error(), w) {
+					t.Errorf("refusal %q does not say %q (a running agent keeps its old socket)", err, w)
+				}
+			}
+			if c.name == "no pair" && !strings.Contains(err.Error(), "restart that agent too") {
+				t.Errorf("refusal %q does not say a running agent must be restarted too", err)
+			}
 			if strings.Contains(err.Error(), "keyholder-pair") || strings.Contains(err.Error(), "start it again") {
 				t.Errorf("refusal %q still points at a hidden command or the old vague advice", err)
 			}

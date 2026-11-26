@@ -152,14 +152,14 @@ func runSessionKey(ctx context.Context, args json.RawMessage) error {
 	key := st.Key()
 	base := sessionKeyBase()
 	if _, serr := os.Lstat(keyholder.SessionDir(base, key)); serr != nil {
-		return fmt.Errorf("session-key: no holder for session %s: with [keyholder] mode on, `sc resume %s` starts a pair for a worker (a session the operator started himself at a terminal gets none)", key, key)
+		return fmt.Errorf("session-key: no holder for session %s: with [keyholder] mode on, `sc resume %s` starts a pair for a worker (a session the operator started himself at a terminal gets none); a session whose agent is already running is not converted: restart that agent too, so it launches on the new pair's socket", key, key)
 	}
 	pair, running, err := sessionKeyRunning(ctx, base, key)
 	if err != nil {
 		return fmt.Errorf("session-key: %w", err)
 	}
 	if !running {
-		return fmt.Errorf("session-key: holder not running for session %s: run `sc keyholder-stop %s` to clear the dead pair, then `sc resume %s` starts a new one (a new key, announced)", key, key, key)
+		return fmt.Errorf("session-key: holder not running for session %s: %s", key, sessionKeyNewPairAdvice(key, "to clear the dead pair"))
 	}
 	listed, err := sessionKeyAgentList(ctx, pair.AgentSock)
 	if err != nil {
@@ -182,10 +182,10 @@ func runSessionKey(ctx context.Context, args json.RawMessage) error {
 	// that lists another key (a session that retired and minted again over its own
 	// socket, or put its own agent where the holder's was) is not vouched for.
 	if pair.Fingerprint == "" {
-		return fmt.Errorf("session-key: the pair's record carries no fingerprint recorded at the mint, so nothing is vouched for; run `sc keyholder-stop %s`, then `sc resume %s` starts a new pair with a new key", key, key)
+		return fmt.Errorf("session-key: the pair's record carries no fingerprint recorded at the mint, so nothing is vouched for; %s", sessionKeyNewPairAdvice(key, "to end this pair"))
 	}
 	if fp != pair.Fingerprint {
-		return fmt.Errorf("session-key: the holder's key changed since the pair started (listed %s, minted %s): refusing to print it; run `sc keyholder-stop %s`, then `sc resume %s` starts a new pair with a new key (announced)", keyholder.SafeSession(fp), keyholder.SafeSession(pair.Fingerprint), key, key)
+		return fmt.Errorf("session-key: the holder's key changed since the pair started (listed %s, minted %s): refusing to print it; %s", keyholder.SafeSession(fp), keyholder.SafeSession(pair.Fingerprint), sessionKeyNewPairAdvice(key, "to end this pair"))
 	}
 	certPath := keyholder.CertPath(base, key)
 	cert := keyholder.InspectCert(ctx, certPath, fp, sessionKeyCertList, sessionKeyNow())
