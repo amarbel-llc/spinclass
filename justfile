@@ -2283,6 +2283,99 @@ debug-keyholder-unit-probe fibby="" piggy="" clown="" clown_rev="f502df21ae7d542
     [ -f "$base/res/result.json" ] && say "result: $(jq -c '{unit, exit_code, main_pid}' "$base/res/result.json" 2>&1)"
     say "systemctl --user clown-agent units now: $(systemctl --user list-units --all --no-legend 2>/dev/null | grep -c 'clown-agent' || true)"
 
+# Key holder end-to-end certificate proof: krusty's route through THIS repo's real holder pair. Two real pairs
+# (fibby + holder, virtual cards, no real card), a THROWAWAY CA standing in for slot 83, a PLAIN-key signature made
+# through the holder (`ssh-keygen -Y sign -U`), `circus cert rewrap` (the merged circus tool), and the verify
+# command hogtie runs (`ssh-keygen -Y verify` against ONE `cert-authority,namespaces="hogtie-v1"` allowed-signers
+# line). Negative controls: the plain signature, another key's certificate, the wrong principal, an expired
+# certificate, another session's holder. Nothing outside a 0700 scratch directory is touched (no card, no
+# /etc/hogtie, no hogtie service, no grant); both pairs are stopped and nothing may be left. Refuses while per-cpu
+# 1-minute load is 1.0 or more. Prints HOGTIE-PROOF-OK only when every positive passed and every negative failed.
+# STAND-IN: the CA, and hogtie's own envelope pre-parse (certificate type, configured CA, window, critical options).
+#
+# prove a holder-signed, circus-rewrapped signature verifies the way hogtie verifies, with negative controls
+[group("debug")]
+debug-keyholder-hogtie-proof fibby="" piggy="" circus="/nix/store/srisylv7g0sms1na3mbjw0dms0f14wsl-circus-cli/bin/circus":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    say() { printf 'hogtie-proof: %s\n' "$*"; }
+    load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
+    if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
+    out="$(nix build .#default --no-link --print-out-paths 2>/dev/null | tail -1)"
+    sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built at $out"; exit 1; }
+    piggy="{{ piggy }}"; [ -n "$piggy" ] || piggy="$(command -v piggy)" || { say "no piggy on PATH"; exit 1; }
+    fibby="{{ fibby }}"
+    if [ -z "$fibby" ]; then for c in /nix/store/*-fibby-holder-0.1.0/bin/fibby; do fibby="$c"; done; fi
+    [ -x "$fibby" ] || { say "no fibby holder build found"; exit 1; }
+    circus="{{ circus }}"; [ -x "$circus" ] || { say "no circus binary at $circus"; exit 1; }
+    base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/khp.XXXXXX")"; chmod 0700 "$base"
+    mkdir -m 0700 "$base/state" "$base/work"
+    export XDG_STATE_HOME="$base/state"
+    unset SSH_AUTH_SOCK PIGGY_AUTH_SOCK
+    s1="proof/one"; s2="proof/two"
+    stopped=0
+    pair() { SPINCLASS_KEYHOLDER_PAIR_RECIPE=1 "$sc" keyholder-pair --fibby "$fibby" --piggy "$piggy" "$@"; }
+    cleanup() {
+      if [ "$stopped" = 0 ]; then pair --action stop --session "$s1" >/dev/null 2>&1 || true; pair --action stop --session "$s2" >/dev/null 2>&1 || true; fi
+      rm -rf "$base"
+    }
+    trap cleanup EXIT
+    fails=0
+    pass() { say "PASS $*"; }
+    fail() { say "FAIL $*"; fails=$((fails + 1)); }
+    say "REAL: spinclass=$sc circus=$circus"; say "REAL: two holder pairs (virtual cards); STAND-IN: throwaway CA for slot 83"
+    for s in "$s1" "$s2"; do
+      pair --action start --session "$s" >"$base/$(echo "$s" | tr / _).out" 2>"$base/$(echo "$s" | tr / _).err" || { say "pair start failed for $s"; cat "$base/$(echo "$s" | tr / _).err"; exit 1; }
+    done
+    sock1="$(sed -n 's/^agent_sock //p' "$base/proof_one.out")"; sock2="$(sed -n 's/^agent_sock //p' "$base/proof_two.out")"
+    cd "$base/work" || exit 1
+    SSH_AUTH_SOCK="$sock1" timeout 30 ssh-add -L >holder1.pub 2>/dev/null; SSH_AUTH_SOCK="$sock2" timeout 30 ssh-add -L >holder2.pub 2>/dev/null
+    [ "$(grep -c '^ssh-' holder1.pub)" = 1 ] && [ "$(grep -c '^ssh-' holder2.pub)" = 1 ] || { say "FAIL: each holder must list exactly one key"; exit 1; }
+    say "holder 1: $(ssh-keygen -lf holder1.pub)"; say "holder 2: $(ssh-keygen -lf holder2.pub)"
+    ssh-keygen -q -t ed25519 -N '' -f ca -C throwaway-ca
+    ssh-keygen -q -s ca -I proof -n flic:restic-snapshots -O clear -V +1h holder1.pub
+    ssh-keygen -q -s ca -I proof2 -n flic:restic-snapshots -O clear -V +1h holder2.pub
+    mkdir exp && cp holder1.pub exp/holder1.pub && (cd exp && ssh-keygen -q -s ../ca -I expired -n flic:restic-snapshots -O clear -V -2h:-1h holder1.pub)
+    printf 'proof message\n' >msg
+    printf '* cert-authority,namespaces="hogtie-v1" %s %s\n' "$(cut -d' ' -f1 ca.pub)" "$(cut -d' ' -f2 ca.pub)" >allowed
+    say "allowed-signers: $(wc -l <allowed) line"
+    # 1. a PLAIN-key signature through the holder (the call that works), then krusty's rewrap, then hogtie's verify command.
+    SSH_AUTH_SOCK="$sock1" ssh-keygen -Y sign -U -f holder1.pub -n hogtie-v1 msg >sign.out 2>&1; rc=$?
+    if [ "$rc" = 0 ] && [ -s msg.sig ]; then pass "1 plain-key signature through holder 1 (rc 0)"; else fail "1 plain-key signature through holder 1: rc=$rc: $(head -c 200 sign.out)"; fi
+    "$circus" cert rewrap --cert holder1-cert.pub <msg.sig >msg.cert.sig 2>rewrap.err; rc=$?
+    if [ "$rc" = 0 ] && [ -s msg.cert.sig ]; then pass "2 circus cert rewrap with holder 1's certificate (rc 0)"; else fail "2 circus cert rewrap: rc=$rc: $(head -c 200 rewrap.err)"; fi
+    vout="$(ssh-keygen -Y verify -f allowed -I flic:restic-snapshots -n hogtie-v1 -s msg.cert.sig <msg 2>&1)"; rc=$?
+    if [ "$rc" = 0 ] && printf '%s' "$vout" | grep -q '^Good'; then pass "3 verify (hogtie's command) accepts the holder-signed, rewrapped signature: $vout"; else fail "3 verify rc=$rc: $vout"; fi
+    # Negative controls: each must FAIL.
+    vout="$(ssh-keygen -Y verify -f allowed -I flic:restic-snapshots -n hogtie-v1 -s msg.sig <msg 2>&1)"; rc=$?
+    if [ "$rc" != 0 ]; then pass "a negative: the PLAIN signature (no rewrap) is refused: rc=$rc ${vout:0:100}"; else fail "a negative: the plain signature VERIFIED"; fi
+    "$circus" cert rewrap --cert holder2-cert.pub <msg.sig >msg.other.sig 2>other.err; rc=$?
+    if [ "$rc" != 0 ]; then pass "b negative: rewrap with ANOTHER key's certificate is refused by the tool: rc=$rc $(head -c 160 other.err)"; else fail "b negative: rewrap with another key's certificate was ACCEPTED"; fi
+    vout="$(ssh-keygen -Y verify -f allowed -I flic:other -n hogtie-v1 -s msg.cert.sig <msg 2>&1)"; rc=$?
+    if [ "$rc" != 0 ]; then pass "c negative: the wrong principal is refused: rc=$rc ${vout:0:100}"; else fail "c negative: the wrong principal VERIFIED"; fi
+    "$circus" cert rewrap --cert exp/holder1-cert.pub <msg.sig >msg.exp.sig 2>exp.err; rc=$?
+    if [ "$rc" != 0 ]; then pass "d negative: the expired certificate is refused by the tool already: rc=$rc $(head -c 120 exp.err)"
+    else
+      vout="$(ssh-keygen -Y verify -f allowed -I flic:restic-snapshots -n hogtie-v1 -s msg.exp.sig <msg 2>&1)"; rc=$?
+      if [ "$rc" != 0 ]; then pass "d negative: the tool wrapped the expired certificate and verify REFUSES it: rc=$rc ${vout:0:100}"; else fail "d negative: the expired certificate VERIFIED"; fi
+    fi
+    # e: ssh-keygen writes msg.sig; keep holder 1's, then sign with holder 2 and keep that one apart.
+    cp msg.sig msg1.sig
+    SSH_AUTH_SOCK="$sock2" ssh-keygen -Y sign -U -f holder2.pub -n hogtie-v1 msg >sign2.out 2>&1 || { say "FAIL: holder 2 could not sign: $(head -c 200 sign2.out)"; fails=$((fails + 1)); }
+    mv msg.sig msg2.sig
+    "$circus" cert rewrap --cert holder1-cert.pub <msg2.sig >msg2.on1.sig 2>e.err; rc=$?
+    if [ "$rc" != 0 ]; then pass "e negative: holder 2's signature rewrapped with holder 1's certificate is refused by the tool: rc=$rc $(head -c 160 e.err)"; else fail "e negative: another session's signature was wrapped with holder 1's certificate"; fi
+    "$circus" cert rewrap --cert holder2-cert.pub <msg2.sig >msg2.cert.sig 2>/dev/null && say "INFO: holder 2's own rewrapped signature verifies as its own principal: $(ssh-keygen -Y verify -f allowed -I flic:restic-snapshots -n hogtie-v1 -s msg2.cert.sig <msg 2>&1 | head -c 100) (hogtie binds the principal, not the session: the per-session separation is that each key has its own certificate)"
+    pair --action stop --session "$s1" >/dev/null 2>&1; pair --action stop --session "$s2" >/dev/null 2>&1; stopped=1
+    sleep 1
+    units="$(systemctl --user list-units --all --no-legend 'spinclass-keyholder-*' 2>&1 | grep -c spinclass-keyholder || true)"
+    procs="$(pgrep -f "$base" || true)"
+    dirs="$(find "$XDG_STATE_HOME" -mindepth 3 -maxdepth 3 -path '*keyholder/*' 2>/dev/null | wc -l)"
+    say "after stop: units=$units processes='${procs}' directories=$dirs"
+    if [ "$units" != 0 ] || [ -n "$procs" ] || [ "$dirs" != 0 ]; then fail "leftovers after stopping both pairs"; fi
+    if [ "$fails" = 0 ]; then say "HOGTIE-PROOF-OK 3 positives passed, 5 negatives failed as expected, nothing left"; else say "FAILED: $fails step(s) failed"; exit 1; fi
+
 # [explore] Poll a worker's record every few seconds and print ONE line per change
 # (UTC time, request queued, restarting_at, restarted_at, claude pid, recorded pid,
 # peek state) until restarted_at is set after restarting_at, or `limit` seconds
