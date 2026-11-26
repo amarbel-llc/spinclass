@@ -3395,3 +3395,150 @@ debug-review-package name base *context:
       [ -f "$f" ] && cp "$f" "$out/context/$(flat "$f")"
     done
     echo "package at $out: $(ls "$out/src" | wc -l) sources, $(ls "$out/tests" | wc -l) tests, $(ls "$out/docs" | wc -l) docs, $(ls "$out/context" | wc -l) context files, $(wc -l < "$out/full.diff") diff lines"
+
+# [debug] The two real halves of the bridge against each other (FDR 0048, J-H1
+# start order): spinclass's real `spinclass serve` listener and clown's real shim
+# (`clown bridge-listen`, built from a clown checkout) in a real transient unit
+# under clown-agent.slice, both start orders: A serves first, then the unit; B
+# starts the unit first, then serve. The launcher's writes (bridge.cgroup, the
+# unit record, the principal mapping) are made by this recipe in the documented
+# format, NOT by clown's own writer functions (bridgewire.WriteCgroupFile and
+# unitresult.WriteResult need a Go import the committed lock does not carry yet).
+# Scratch under a 0700 mktemp; nothing of the operator's is touched; one run at a
+# time (host-load per-cpu < 1.0).
+#
+# run both real halves against each other in both start orders
+[group("debug")]
+debug-bridge-halves-proof clown_tree="/home/sasha/eng/repos/clown/.worktrees/deft-hazel":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C
+    say() { printf 'halves: %s\n' "$*"; }
+    failed=0
+    pass() { say "PASS: $*"; }
+    fail() { say "FAIL: $*"; failed=1; }
+    load="$(cut -d' ' -f1 /proc/loadavg)"; cpus="$(nproc)"
+    if awk -v l="$load" -v n="$cpus" 'BEGIN{exit !(l/n >= 1.0)}'; then say "REFUSED: load $load over $cpus cpus is per-cpu >= 1.0"; exit 1; fi
+    command -v socat >/dev/null || { say "socat is needed"; exit 1; }
+    out="$(nix build .#default --no-link --print-out-paths 2>/dev/null | tail -1)"
+    sc="$out/bin/spinclass"; [ -x "$sc" ] || { say "no spinclass built"; exit 1; }
+    cl="$(nix build --no-link --print-out-paths "path:{{ clown_tree }}#default" 2>"${TMPDIR:-/tmp}/halves-clown-build.err" | tail -1)"
+    clown="$cl/bin/clown"; [ -x "$clown" ] || { say "no clown built from {{ clown_tree }}"; tail -5 "${TMPDIR:-/tmp}/halves-clown-build.err"; exit 1; }
+    say "spinclass=$sc"; say "clown=$clown"
+    base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/bh.XXXXXX")"; chmod 0700 "$base"
+    ua="clown-agent-bh$$a.service"; ub="clown-agent-bh$$b.service"
+    serve_pids=()
+    cleanup() {
+      for u in "$ua" "$ub"; do systemctl --user stop "$u" >/dev/null 2>&1 || true; done
+      for p in "${serve_pids[@]}"; do kill "$p" >/dev/null 2>&1 || true; done
+      exec 8>&- 9>&- 2>/dev/null || true
+      sleep 0.3
+      rm -rf "$base"
+    }
+    trap cleanup EXIT
+    export HOME="$base/home" XDG_STATE_HOME="$base/state" XDG_CONFIG_HOME="$base/cfg"
+    mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CONFIG_HOME"
+    export GIT_AUTHOR_NAME=halves GIT_AUTHOR_EMAIL=h@example.invalid GIT_COMMITTER_NAME=halves GIT_COMMITTER_EMAIL=h@example.invalid GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+    git init -q --bare --initial-branch=master "$base/up.git"
+    git init -q --initial-branch=master "$base/seed"
+    git -C "$base/seed" -c commit.gpgsign=false commit -q --allow-empty -m initial
+    git -C "$base/seed" remote add origin "$base/up.git"
+    git -C "$base/seed" push -q -u origin master
+    git clone -q "$base/up.git" "$base/proj"
+    ( cd "$base/proj" && "$sc" --format tap start --no-attach >"$base/start.out" 2>&1 ) || { say "sc start failed"; tail -5 "$base/start.out"; exit 1; }
+    wt="$(ls -d "$base/proj/.worktrees"/*/ 2>/dev/null | head -1)"; wt="${wt%/}"
+    [ -d "$wt" ] || { say "no worktree"; exit 1; }
+    key="proj/$(basename "$wt")"; principal="halves-$$"
+    h="$(printf %s "$(realpath "$wt")" | sha256sum | cut -c1-16)"
+    rec="$XDG_STATE_HOME/spinclass/units/$h.json"
+    map="$XDG_STATE_HOME/spinclass/principals/$principal.json"
+    say "session=$key principal=$principal"
+    init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"halves","version":"0"}}}'
+    who='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whoami","arguments":{}}}'
+    rpc() { printf '%s\n%s\n' "$2" "$3" | timeout 10 socat -t3 - UNIX-CONNECT:"$1" 2>/dev/null; }
+    raw() { printf '%s\n' "$2" | timeout 5 socat -t2 - UNIX-CONNECT:"$1" 2>/dev/null; }
+    waitfor() { # seconds, test command...
+      local n="$1"; shift; local end=$((SECONDS + n))
+      while [ "$SECONDS" -lt "$end" ]; do "$@" && return 0; sleep 0.1; done; return 1
+    }
+    start_serve() { # label fd unit
+      bd="$base/b$1"; cgf="$base/cg$1"; mkdir -m 0700 "$bd"
+      mkfifo "$base/in$1"
+      if [ "$2" = 9 ]; then exec 9<>"$base/in$1"; else exec 8<>"$base/in$1"; fi
+      ( cd "$wt" && exec env SPINCLASS_SESSION_ID="$key" CLOWN_SESSION_ID="$principal" CLOWN_BRIDGE_DIR="$bd" CLOWN_BRIDGE_UNIT="$3" CLOWN_BRIDGE_CGROUP_FILE="$cgf" "$sc" serve <"$base/in$1" >"$base/serve$1.out" 2>"$base/serve$1.err" ) &
+      serve_pids+=("$!")
+    }
+    start_unit() { # label unit
+      local nm="${2%.service}"
+      systemd-run --user --quiet --collect --slice=clown-agent.slice --unit="$nm" \
+        -p StandardOutput=file:"$base/shim$1.out" -p StandardError=file:"$base/shim$1.err" \
+        "$clown" bridge-listen --socket "$base/b$1/bridge.sock" --unix "$base/ep$1.sock=session" >/dev/null 2>&1
+    }
+    write_cg() { # label unit: the launcher's write once the unit is active
+      local cg; cg="$(systemctl --user show -p ControlGroup --value "$2")"
+      case "$cg" in */clown-agent.slice/"$2") ;; *) fail "unit cgroup $cg does not end in /clown-agent.slice/$2"; return 1;; esac
+      printf '%s' "$cg" >"$base/cg$1.tmp"; chmod 0600 "$base/cg$1.tmp"; mv "$base/cg$1.tmp" "$base/cg$1"
+      cgval="$cg"
+    }
+    write_record_and_mapping() { # unit
+      mkdir -p "$(dirname "$rec")" "$(dirname "$map")"
+      printf '{\n  "version": 1,\n  "capabilities": ["bridge-v1"],\n  "unit": "%s",\n  "principal": "%s",\n  "cgroup": "%s",\n  "uid": %s,\n  "bridge": "recorded"\n}\n' "$1" "$principal" "$cgval" "$(id -u)" >"$rec"
+      printf '{"version":1,"principal":"%s","session_key":"%s","worktree":"%s","unit":"%s"}\n' "$principal" "$key" "$wt" "$1" >"$map"
+      # claude's SessionStart hook, run for real (it stamps the principal into the session record).
+      ( cd "$wt" && printf '{"hook_event_name":"SessionStart","session_id":"halves","source":"startup","cwd":"%s"}' "$wt" | env CLOWN_SESSION_ID="$principal" "$sc" hook >"$base/hook.out" 2>&1 ) || say "SessionStart hook exited nonzero: $(head -c 200 "$base/hook.out")"
+    }
+    shim_ready() { grep -q '^bridge-listen: ready control' "$base/shim$1.out" 2>/dev/null; }
+    sock_up() { [ -S "$1" ]; }
+
+    say "=== ORDER A: serve up before the unit ==="
+    start_serve a 9 "$ua"
+    waitfor 10 sock_up "$base/ba/bridge.sock" && pass "A: serve bound bridge.sock at once, with no mapping, no record, no cgroup file" || fail "A: serve never bound bridge.sock"
+    r="$(raw "$base/ba/bridge.sock" 'BRIDGE/1 control')"
+    case "$r" in "ERR refused"*) pass "A: control answers ERR refused while the cgroup file is missing";; *) fail "A: control before the cgroup file got: $r";; esac
+    start_unit a "$ua" && say "unit $ua started (the shim is its main process)" || fail "A: systemd-run failed"
+    waitfor 10 systemctl --user is-active --quiet "$ua"
+    write_cg a "$ua" && say "cgroup file written: $cgval"
+    if waitfor 15 shim_ready a; then pass "A: the shim holds control (ready control) before any mapping or record exists"; else fail "A: no 'ready control' in 15 s"; cat "$base/shima.out" 2>/dev/null; fi
+    r="$(rpc "$base/epa.sock" "$init" "$who")"
+    case "$r" in *'"result"'*) fail "A: a session call before the mapping was answered: $r";; *) pass "A: a session call before the mapping/record is not served (no result)";; esac
+    if grep -qi 'refused' "$base/shima.err" 2>/dev/null; then pass "A: the shim logged the refusal ($(grep -i refused "$base/shima.err" | head -1 | cut -c1-120))"; else fail "A: the shim logged no refusal"; fi
+    write_record_and_mapping "$ua"
+    r="$(rpc "$base/epa.sock" "$init" "$who")"
+    case "$r" in *"$key"*'"result"'*|*'"result"'*"$key"*) pass "A: whoami through the shim answers for $key after the record and mapping";; *) fail "A: whoami after the mapping got: $r";; esac
+    r="$(raw "$base/ba/bridge.sock" 'BRIDGE/1 control')"
+    case "$r" in "ERR refused"*) pass "A: a foreign caller (a process outside the unit) gets ERR refused";; *) fail "A: a foreign caller got: $r";; esac
+    rm -f "$base/cga"
+    sleep 5
+    if ! sock_up "$base/ba/bridge.sock" || [ -z "$(rpc "$base/epa.sock" "$init" "$who")" ]; then pass "A: the cgroup file removed after being valid ends the listener's service"; else fail "A: the listener still serves after the cgroup file was removed"; fi
+    if grep -qi 'down' "$base/shima.err" 2>/dev/null; then pass "A: the shim said the bridge is down ($(grep -i down "$base/shima.err" | tail -1 | cut -c1-140))"; else fail "A: the shim never said down"; fi
+    systemctl --user stop "$ua" >/dev/null 2>&1 || true
+    kill "${serve_pids[0]}" >/dev/null 2>&1 || true
+    exec 9>&-
+
+    say "=== ORDER B: the unit up before serve ==="
+    mkdir -m 0700 "$base/bb"
+    t0=$SECONDS
+    start_unit b "$ub" || fail "B: systemd-run failed"
+    waitfor 10 systemctl --user is-active --quiet "$ub"
+    write_cg b "$ub"
+    sleep 3
+    if shim_ready b; then fail "B: the shim claimed ready control with no serve at all"; else pass "B: with no serve the shim is not ready (it retries control)"; fi
+    rmdir "$base/bb" 2>/dev/null; start_serve b 8 "$ub"
+    if waitfor 15 shim_ready b; then pass "B: the shim was admitted $((SECONDS - t0)) s after the unit started, once serve bound (inside the 15 s window, no deadlock)"; else fail "B: no 'ready control' after serve bound"; cat "$base/shimb.err" 2>/dev/null | tail -3; say "bb: $(ls -la "$base/bb" 2>&1 | tr '\n' ' ')"; say "serve b alive: $(kill -0 "${serve_pids[1]}" 2>&1 && echo yes || echo no)"; fi
+    write_record_and_mapping "$ub"
+    r="$(rpc "$base/epb.sock" "$init" "$who")"
+    case "$r" in *"$key"*'"result"'*|*'"result"'*"$key"*) pass "B: whoami through the shim answers for $key";; *) fail "B: whoami got: $r";; esac
+    systemctl --user stop "$ub" >/dev/null 2>&1 || true
+    kill "${serve_pids[1]}" >/dev/null 2>&1 || true
+    exec 8>&-
+    sleep 0.5
+
+    left_units="$(systemctl --user list-units --all --no-legend 'clown-agent-bh*' 2>/dev/null | grep -c "bh$$")"
+    left_procs="$(pgrep -f "$base" | grep -vc "^$$\$" || true)"
+    if [ "${left_units:-0}" = 0 ]; then pass "no transient unit left"; else fail "$left_units unit(s) left"; fi
+    if [ "${left_procs:-0}" = 0 ]; then pass "no process left naming the scratch directory"; else fail "$left_procs process(es) left"; pgrep -af "$base" | head -3; fi
+    if [ "$failed" = 0 ]; then say "HALVES-PROOF-OK both orders: serve first and unit first"; else
+      say "serve a err:"; tail -5 "$base/servea.err" 2>/dev/null; say "shim a err:"; tail -5 "$base/shima.err" 2>/dev/null
+      say "serve b err:"; tail -5 "$base/serveb.err" 2>/dev/null; say "shim b err:"; tail -5 "$base/shimb.err" 2>/dev/null
+      exit 1
+    fi
