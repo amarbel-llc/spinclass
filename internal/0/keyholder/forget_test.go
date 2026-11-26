@@ -67,6 +67,33 @@ func TestStopFoundOfALockOnlyEntryLeavesAPairALaunchMadeSince(t *testing.T) {
 	}
 }
 
+// The close chose ForgetSession because it saw no pair directory; a start that
+// held the lock while ForgetSession waited has made a live pair since. Looking
+// again under the lock, ForgetSession stops that pair the proper way (units, then
+// directories, then the records) instead of deleting the records of a pair it
+// leaves running.
+func TestForgetSessionStopsAPairAStartMadeWhileItWaitedForTheLock(t *testing.T) {
+	l, f, _ := launcher(t)
+	const key = "spinclass/raced"
+	if _, err := l.Start(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.ForgetSession(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(SessionDir(l.Base, key)); err == nil {
+		t.Error("ForgetSession left the pair directory a start had made")
+	}
+	if n := f.count("stop "); n < 2 {
+		t.Errorf("the pair's units were stopped %d time(s), want both stopped before their directories went", n)
+	}
+	for _, p := range []string{LastPath(l.Base, key), KindPath(l.Base, key), lockPathHash(l.Base, Hash(key))} {
+		if _, err := os.Lstat(p); err == nil {
+			t.Errorf("%s survived ForgetSession", p)
+		}
+	}
+}
+
 // A session with nothing on record costs three stats and creates nothing.
 func TestForgetSessionWithNothingOnRecordCreatesNothing(t *testing.T) {
 	l, _, _ := launcher(t)

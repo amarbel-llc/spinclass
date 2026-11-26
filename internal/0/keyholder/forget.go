@@ -34,6 +34,18 @@ func (l *Launcher) ForgetSession(ctx context.Context, sessionKey string) error {
 	if err != nil {
 		return err
 	}
+	// The caller chose this path because there was no pair directory; a start that
+	// held the lock while it waited has made one since. Look again under the lock:
+	// a pair left running with its records deleted is the worse outcome, so stop it
+	// the proper way (units, then directories, then the history and kind record).
+	if _, serr := os.Lstat(SessionDir(l.Base, sessionKey)); serr == nil {
+		if err := l.stop(ctx, sessionKey); err != nil {
+			h.Unlock() // the pair is still there: keep the lock file with it
+			return err
+		}
+		h.Remove()
+		return nil
+	}
 	if err := os.Remove(LastPath(l.Base, sessionKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		h.Unlock()
 		return err
