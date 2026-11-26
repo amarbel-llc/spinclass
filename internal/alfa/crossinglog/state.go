@@ -99,7 +99,7 @@ func (s State) Note() string {
 // spaces, runs of space collapse, and the result is cut to maxStateReason runes.
 func SafeReason(s string) string {
 	s = strings.Map(func(c rune) rune {
-		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) || c == ' ' || c == ' ' {
+		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) || c == '\u2028' || c == '\u2029' {
 			return ' '
 		}
 		return c

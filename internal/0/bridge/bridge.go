@@ -236,7 +236,7 @@ func boundedReason(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
-		case r == utf8.RuneError, unicode.IsControl(r), unicode.Is(unicode.Cf, r), r == ' ', r == ' ':
+		case r == utf8.RuneError, unicode.IsControl(r), unicode.Is(unicode.Cf, r), r == '\u2028', r == '\u2029':
 			b.WriteByte(' ')
 		default:
 			b.WriteRune(r)

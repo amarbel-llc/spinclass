@@ -471,10 +471,10 @@ func TestUnusableMessageTurnsInvalidUTF8IntoSpaces(t *testing.T) {
 
 func TestUnusableMessageNeverHoldsAControlOrFormatRuneOrExceedsItsBound(t *testing.T) {
 	const fixed = len("clown: the bridge is unusable (); no tool or model call can leave this session; check the serve's log and spinclass session-health, and that the session's bridge setting matches the serve's")
-	for _, in := range []string{"x‮y", "a\u0085b", "tab\there", "\x7fdel", strings.Repeat("‮", 300), strings.Repeat("é", 500)} {
+	for _, in := range []string{"x\u202ey", "a\u0085b", "tab\there", "\x7fdel", strings.Repeat("\u202e", 300), strings.Repeat("é", 500)} {
 		got := UnusableMessage(in)
 		for _, r := range got {
-			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == ' ' || r == ' ' {
+			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
 				t.Errorf("UnusableMessage(%q) holds the rune %U", in, r)
 			}
 		}
