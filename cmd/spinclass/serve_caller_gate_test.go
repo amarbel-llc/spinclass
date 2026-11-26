@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // useRealServeClassifier undoes TestMain's unconfined default for one test.
@@ -203,26 +208,196 @@ var openServeTools = map[string]string{
 		"a session may stop itself with no right",
 }
 
-func TestEveryServeToolIsGatedOrDeclaredOpen(t *testing.T) {
+// ownershipVerdictServeTools are the MCP tools that classify their caller
+// themselves instead of calling refuseConfinedServeCaller: the grit store
+// tools (FDR 0036 section 9). Each maps to one WRITE call that a confined
+// caller owning nothing (no recognised session worktree) must be refused; the
+// verdict is the store backend's, so the refusal is "refusing ...".
+var ownershipVerdictServeTools = map[string]string{
+	"grit_stage":    `{"subcommand":"add","paths":["x"]}`,
+	"grit_branch":   `{"subcommand":"create","name":"nope"}`,
+	"grit_commit":   `{"message":"x"}`,
+	"grit_tag":      `{"subcommand":"create","name":"nope"}`,
+	"grit_worktree": `{"subcommand":"remove","path":"/nonexistent"}`,
+	"grit_stash":    `{"subcommand":"save"}`,
+	"grit_remote":   `{"subcommand":"push"}`,
+	"grit_merge":    `{"branch":"x"}`,
+	"grit_clone":    `{"source":"x","destination":"y"}`,
+}
+
+// The older serve route serves the whole registry and relies on every handler
+// deciding for itself: a deny gate, not an allow-list. This test is what makes
+// that safe: EVERY registered MCP tool (grit_* included, hidden ones included)
+// must have EXACTLY ONE class in the three tables above (gated, declared open,
+// or ownership verdict), so a new tool cannot be reachable by a confined caller
+// by omission, and a table row naming a tool that no longer exists is stale.
+//
+// Some tools are registered only under a condition (the merge/check pair by
+// [hooks].disable-merge, the *-async tools and session-job-cancel under clown,
+// nothing-but-the-truth when pre-merge skills are listed), and the registry of
+// THIS test process has only one side of each. So the walk also reads the
+// package's own sources for every `command.Command{Name: "...", Run: ...}`
+// literal, so a conditionally registered tool cannot hide from the table.
+func TestEveryServeToolHasExactlyOneClass(t *testing.T) {
 	gated := map[string]bool{}
 	for _, h := range gatedServeHandlers {
-		gated[strings.TrimSuffix(h.tool, " accept")] = true
+		if strings.HasSuffix(h.tool, " accept") {
+			continue // a partial gate on a tool that is also open: see below
+		}
+		gated[h.tool] = true
 	}
-	seen := map[string]bool{}
+	// list-handles is mixed: plain listing is open, accept is gated (its row
+	// says "list-handles accept"). A partial gate is only legal on an open tool.
+	for _, h := range gatedServeHandlers {
+		if tool, partial := strings.CutSuffix(h.tool, " accept"); partial {
+			if _, open := openServeTools[tool]; !open {
+				t.Errorf("gatedServeHandlers has a partial gate %q on %q, which is not declared open (openServeTools): a tool is either gated or open, a partial gate is only for a mixed tool", h.tool, tool)
+			}
+		}
+	}
+	registered := map[string]bool{}
 	for name, cmd := range buildApp().AllCommands() {
-		if cmd.Run == nil || cmd.Hidden || strings.HasPrefix(name, "grit_") {
-			continue // grit_* classify their caller themselves (FDR 0036 section 9)
-		}
-		seen[name] = true
-		if _, open := openServeTools[name]; !gated[name] && !open {
-			t.Errorf("MCP tool %q is neither gated (gatedServeHandlers) nor declared open (openServeTools)", name)
+		if cmd.Run != nil {
+			registered[name] = true
 		}
 	}
-	for _, want := range []string{"resurrect", "list", "whoami", "close-child-session"} {
-		if !seen[want] {
+	for name := range literalServeToolNames(t) {
+		registered[name] = true
+	}
+	for name := range registered {
+		_, open := openServeTools[name]
+		_, owned := ownershipVerdictServeTools[name]
+		classes := 0
+		for _, in := range []bool{gated[name], open, owned} {
+			if in {
+				classes++
+			}
+		}
+		switch classes {
+		case 0:
+			t.Errorf("MCP tool %q has no class: add it to gatedServeHandlers, openServeTools or ownershipVerdictServeTools (a new tool is forbidden to a confined caller until someone decides)", name)
+		case 1:
+		default:
+			t.Errorf("MCP tool %q is in more than one of gatedServeHandlers, openServeTools and ownershipVerdictServeTools; it has exactly one class", name)
+		}
+	}
+	for name := range gated {
+		if !registered[name] {
+			t.Errorf("gatedServeHandlers names %q, which is not a registered MCP tool (a stale row)", name)
+		}
+	}
+	for name := range openServeTools {
+		if !registered[name] {
+			t.Errorf("openServeTools names %q, which is not a registered MCP tool (a stale row)", name)
+		}
+	}
+	for name := range ownershipVerdictServeTools {
+		if !registered[name] {
+			t.Errorf("ownershipVerdictServeTools names %q, which is not a registered MCP tool (a stale row)", name)
+		}
+	}
+	for _, want := range []string{"resurrect", "list", "whoami", "close-child-session", "grit_stage", "grit_clone"} {
+		if !registered[want] {
 			t.Errorf("the walk did not see %q; the completeness check is not looking at the registered tools", want)
 		}
 	}
+}
+
+// Every ownership-verdict tool must really refuse a confined caller that owns
+// nothing, through the registered handler and the REAL caller classification
+// (not a stubbed gritCaller): a confined serve (a unit record names its
+// principal) running in a directory that is no session worktree.
+func TestEveryOwnershipVerdictServeToolRefusesAConfinedCallerThatOwnsNothing(t *testing.T) {
+	for name, payload := range ownershipVerdictServeTools {
+		t.Run(name, func(t *testing.T) {
+			asConfinedServeCaller(t, "a-confined-principal")
+			t.Chdir(t.TempDir())
+			t.Setenv("HOME", t.TempDir())
+			// The refusal below also happens for an unconfined caller that owns
+			// nothing, so pin the classification itself: this serve's caller is
+			// confined, by the same function every grit tool resolves through.
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := gritCaller(context.Background(), cwd); got.Confinement != store.ConfinementConfined || !got.NoSession {
+				t.Fatalf("%s: the caller must classify as confined and owning nothing, got Confinement=%v NoSession=%v", name, got.Confinement, got.NoSession)
+			}
+			cmd, ok := buildApp().GetCommand(name)
+			if !ok || cmd.Run == nil {
+				t.Fatalf("%s is not a registered MCP tool", name)
+			}
+			res, err := cmd.Run(context.Background(), json.RawMessage(payload), nil)
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if !res.IsErr || !strings.Contains(res.Text, "refusing") {
+				t.Fatalf("%s: a confined caller owning nothing must be refused by the ownership verdict, got isErr=%v %q", name, res.IsErr, res.Text)
+			}
+		})
+	}
+}
+
+// literalServeToolNames returns the names of every `command.Command{Name:
+// "literal", Run: ...}` literal in this package's non-test sources: the tools a
+// build can register on some condition, whether or not THIS process did. A
+// name that is not a string literal (grit_<tool>, plugin commands, which are
+// CLI-only) is not seen here; grit_* come in through the registry walk.
+func literalServeToolNames(t *testing.T) map[string]bool {
+	t.Helper()
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("reading the package's own sources to find conditionally registered tools: %v", err)
+	}
+	names := map[string]bool{}
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				lit, ok := n.(*ast.CompositeLit)
+				if !ok {
+					return true
+				}
+				sel, ok := lit.Type.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Command" {
+					return true
+				}
+				if x, ok := sel.X.(*ast.Ident); !ok || x.Name != "command" {
+					return true
+				}
+				var name string
+				var hasRun bool
+				for _, el := range lit.Elts {
+					kv, ok := el.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					key, ok := kv.Key.(*ast.Ident)
+					if !ok {
+						continue
+					}
+					switch key.Name {
+					case "Name":
+						if bl, ok := kv.Value.(*ast.BasicLit); ok && bl.Kind == token.STRING {
+							name = strings.Trim(bl.Value, "\"`")
+						}
+					case "Run":
+						hasRun = true
+					}
+				}
+				if name != "" && hasRun {
+					names[name] = true
+				}
+				return true
+			})
+		}
+	}
+	if len(names) < 20 {
+		t.Fatalf("the source walk found only %d tool literals (%v): it is not reading the package's sources", len(names), names)
+	}
+	return names
 }
 
 // Plain list-handles reads only the caller's own handles, so it stays open
