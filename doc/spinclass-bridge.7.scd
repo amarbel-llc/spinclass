@@ -674,8 +674,8 @@ right, a holder's *stop-child-session* or the operator's `sc stop <session> --no
 at a terminal outside the unit, is what permits it; the always-ask the tool
 description names is the in-unit hook, which that route skips). It stops only
 the caller's own session. A confined caller is also refused a restart of a
-stopped session (a holder with the right "start", or the operator, runs
-`sc start-stopped <session> --message <text>`). (#532)
+stopped session (a holder with the right "start", or the operator, runs the
+command `sc start-stopped <session> --message <text>`). (#532)
 
 ## Deploy note: the floor tightens existing confined sessions
 
