@@ -132,6 +132,9 @@ func khUseFake(t *testing.T, f *khFakeRunner) (launcherBuilt *int) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	// A production build pins these; a launch bakes ssh-keygen into the
+	// session's git signing program.
+	t.Cleanup(keyholder.OverrideSSHPins("/pin/ssh-add", "/pin/ssh-keygen"))
 	built := 0
 	prev := keyholderLauncherFn
 	t.Cleanup(func() { keyholderLauncherFn = prev })

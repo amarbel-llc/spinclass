@@ -66,6 +66,7 @@ func khRealChecks(t *testing.T, f *khFakeRunner) *keyholder.Tools {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	t.Cleanup(keyholder.OverrideSSHPins("/pin/ssh-add", "/pin/ssh-keygen"))
 	var got keyholder.Tools
 	prev := keyholderLauncherFn
 	t.Cleanup(func() { keyholderLauncherFn = prev })

@@ -435,9 +435,11 @@
             goRunInputs = [ tommy.packages.${system}.default ];
 
             # On PATH for tests on both backends: internal/0/clown's contract
-            # tests drive the real ringmaster CLI (#253).
+            # tests drive the real ringmaster CLI (#253), and the key holder's
+            # signing test runs git through a real ssh-agent.
             nativeCheckInputs = [
               pkgs.git
+              pkgs.openssh
               ringmaster.packages.${system}.ringmaster
             ];
 

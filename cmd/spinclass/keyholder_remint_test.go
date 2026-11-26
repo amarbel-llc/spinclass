@@ -60,6 +60,7 @@ func khRemintEnv(t *testing.T) *khMintingRunner {
 	mk := func() *keyholder.Launcher {
 		return &keyholder.Launcher{Base: base, Tools: keyholder.Tools{Fibby: "/pin/fibby", Piggy: "/pin/piggy"}, Run: r, Wait: time.Second}
 	}
+	t.Cleanup(keyholder.OverrideSSHPins("/pin/ssh-add", "/pin/ssh-keygen"))
 	prevBase, prevL, prevS := keyholderStateBaseFn, keyholderLauncherFn, keyholderStatusLauncherFn
 	keyholderStateBaseFn = func() string { return base }
 	keyholderLauncherFn = func(keyholder.Tools) (*keyholder.Launcher, error) { return mk(), nil }

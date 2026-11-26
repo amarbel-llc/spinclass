@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -167,7 +168,50 @@ func keyholderSessionEnvUndo(home, repoPath, sessionKey string, stderr io.Writer
 			}
 		}
 	}
+	// A plain commit in the session signs with the holder's key: git settings in
+	// its environment (keyholder.GitSigningEnv).
+	signing, err := holderGitSigningEnv(l, repoPath, sessionKey, pair)
+	if err != nil {
+		if undo != nil {
+			undo()
+		}
+		return nil, nil, fmt.Errorf("setting up commit signing with the session's key holder: %w\n    next: run `sc keyholder-selftest` to see the failing step, or run without the key holder: `sc keyholder-switch off`", err)
+	}
+	maps.Copy(kh, signing)
 	return kh, undo, nil
+}
+
+func holderGitSigningEnv(l *keyholder.Launcher, repoPath, sessionKey string, pair keyholder.Pair) (map[string]string, error) {
+	keygen, err := keyholder.SSHKeygenPin()
+	if err != nil {
+		return nil, err
+	}
+	return keyholder.GitSigningEnv(l.Base, sessionKey, keygen, pair, os.Environ(), configuredAllowedSigners(repoPath))
+}
+
+// maxAllowedSignersSize bounds the operator's allowed-signers file copied into
+// a session's.
+const maxAllowedSignersSize = 1 << 20
+
+// configuredAllowedSigners is the content of the allowed-signers file git is
+// already configured with for repoPath, so the session still verifies those
+// signatures; nil when none is named or it cannot be read.
+func configuredAllowedSigners(repoPath string) []byte {
+	path, err := git.Run(repoPath, "config", "--type=path", "--get", "gpg.ssh.allowedSignersFile")
+	if err != nil || path == "" {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoPath, path)
+	}
+	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() || info.Size() > maxAllowedSignersSize {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // withKeyholderEnv returns env with the key holder's variables laid over it

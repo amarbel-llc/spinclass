@@ -1520,6 +1520,37 @@ without a holder its output is unchanged. *sc list* says nothing about a healthy
 pair: its *keyholder* note (also in *--format json*) appears only when something
 needs doing.
 
+*Signing.* In a worker with its own holder, a plain *git commit* (and *git
+commit -S*) is signed with the holder's key. The operator's key is not used. The
+settings are in the worker's environment, as git's *GIT_CONFIG_COUNT* pairs:
+*gpg.format=ssh*, *user.signingkey=key::<the holder's public key>*,
+*commit.gpgsign=true*, *gpg.ssh.program* (a script spinclass writes at
+*$XDG_STATE_HOME/spinclass/keyholder-git-sign*, which runs the pinned
+*ssh-keygen* against the holder's socket) and *gpg.ssh.allowedSignersFile* (the
+pair's *allowed_signers*: the holder's key for any committer, followed by the
+file your git already named, so *git verify-commit* works in the worker).
+Environment settings win over every git config file, so another signing format
+or *commit.gpgsign=false* in one does not apply to the worker; *git -c* still
+does. *tag.gpgsign* is left as configured.
+
+No git config file is written, so there is nothing to undo. Your own git in the
+same worktree, a *sc merge* from your terminal included, signs as you
+configured it. A merge the worker's own spinclass runs re-signs what it rebases
+with the holder's key. A resume or a start gives the environment the current
+pair; a worker whose holder was replaced while it ran keeps the old key until it
+is restarted, and its commits fail. When signing fails, git prints that the key
+holder of the session did not sign, with what to type: *sc session-key
+SESSION*, then *sc keyholder-stop SESSION* and *sc resume SESSION*, or *git -c
+commit.gpgsign=false commit* to commit unsigned once. Every git the worker
+runs inherits the settings, in this repository or another, test suites
+included.
+
+No forge knows the holder's key, so a forge shows these commits as unverified,
+and the key does not let the worker push: pushing uses the *[auth]* token. To
+verify one outside the worker, name the key *sc session-key SESSION* prints in
+an allowed-signers file (a line *\* namespaces="git" <key type> <key>*) and run
+*git -c gpg.ssh.allowedSignersFile=FILE verify-commit REV*.
+
 *The switch file (no deploy; spinclass#519).* The operator can flip the key
 holder without a deploy, in either direction, with *sc keyholder-switch on*,
 *off* or *default*, run at a terminal. It writes one word to
